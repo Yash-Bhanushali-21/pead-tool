@@ -200,7 +200,7 @@ def analyze_batch(args):
                 results.append({
                     'Symbol': symbol,
                     'Announcement_Date': announcement_date,
-                    'Composite_Score': result['composite_score']['score'],
+                    'Composite_Score': result['composite_score']['composite_score'],
                     'Rating': result['composite_score']['rating'],
                     'Confidence': result['composite_score']['confidence']
                 })

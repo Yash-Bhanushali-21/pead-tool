@@ -157,6 +157,7 @@ class AbnormalReturns:
 
         # Add trading day index
         if len(event_data) > 0:
+            event_data = event_data.copy()  # Avoid SettingWithCopyWarning
             event_data['trading_day'] = range(start_offset, start_offset + len(event_data))
 
         return event_data
