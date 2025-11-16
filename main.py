@@ -197,12 +197,56 @@ def analyze_batch(args):
             )
 
             if result['success']:
+                composite = result['composite_score']
+                car_data = result.get('car_data', {})
+                market_model = result.get('market_model', {})
+
+                # Extract component scores
+                components = composite.get('components', {})
+
+                # Extract CARs
+                car_1d = car_data.get(1, {}).get('car_pct', 0)
+                car_10d = car_data.get(10, {}).get('car_pct', 0)
+                car_30d = car_data.get(30, {}).get('car_pct', 0)
+                car_60d = car_data.get(60, {}).get('car_pct', 0)
+                car_90d = car_data.get(90, {}).get('car_pct', 0)
+
+                # Check for significance
+                car_30d_sig = car_data.get(30, {}).get('significant', False)
+                car_60d_sig = car_data.get(60, {}).get('significant', False)
+                car_90d_sig = car_data.get(90, {}).get('significant', False)
+
                 results.append({
                     'Symbol': symbol,
                     'Announcement_Date': announcement_date,
-                    'Composite_Score': result['composite_score']['composite_score'],
-                    'Rating': result['composite_score']['rating'],
-                    'Confidence': result['composite_score']['confidence']
+                    'Composite_Score': composite['composite_score'],
+                    'Rating': composite['rating'],
+                    'Confidence': composite['confidence'],
+                    'Recommendation': composite.get('recommendation', 'N/A'),
+
+                    # Component scores
+                    'Earnings_Surprise': components.get('earnings_surprise', 0),
+                    'Price_Reaction': components.get('price_reaction', 0),
+                    'Drift_Confirmation': components.get('drift_confirmation', 0),
+                    'Earnings_Quality': components.get('earnings_quality', 0),
+                    'Contextual': components.get('contextual', 0),
+
+                    # CAR values
+                    'CAR_1d': car_1d,
+                    'CAR_10d': car_10d,
+                    'CAR_30d': car_30d,
+                    'CAR_60d': car_60d,
+                    'CAR_90d': car_90d,
+
+                    # Significance flags
+                    'CAR_30d_Significant': car_30d_sig,
+                    'CAR_60d_Significant': car_60d_sig,
+                    'CAR_90d_Significant': car_90d_sig,
+
+                    # Market model
+                    'Alpha': market_model.get('alpha', 0),
+                    'Beta': market_model.get('beta', 0),
+                    'R_Squared': market_model.get('r_squared', 0)
                 })
             else:
                 print(f"   Failed: {result.get('error', 'Unknown error')}")
@@ -216,18 +260,101 @@ def analyze_batch(args):
         results_df = pd.DataFrame(results)
         results_df = results_df.sort_values('Composite_Score', ascending=False)
 
-        print("\n" + "="*70)
-        print("BATCH ANALYSIS SUMMARY")
-        print("="*70 + "\n")
-        print(results_df.to_string(index=False))
-
-        # Save to CSV
+        # Save comprehensive CSV
         output_path = Path(args.output) / 'batch_analysis_summary.csv'
         results_df.to_csv(output_path, index=False)
 
-        print("\n" + "="*70)
-        print(f"Results saved to: {output_path}")
-        print("="*70 + "\n")
+        print("\n" + "="*100)
+        print("BATCH ANALYSIS SUMMARY - DETAILED REPORT")
+        print("="*100 + "\n")
+
+        # Print each stock with detailed breakdown
+        for idx, row in results_df.iterrows():
+            print(f"\n{'='*100}")
+            print(f"#{idx+1}. {row['Symbol']} | Announcement: {row['Announcement_Date'].date()}")
+            print(f"{'='*100}")
+
+            print(f"\n  COMPOSITE SCORE: {row['Composite_Score']:.2f}/100")
+            print(f"  Rating:          {row['Rating']}")
+            print(f"  Confidence:      {row['Confidence']:.0%}")
+            print(f"  Recommendation:  {row['Recommendation']}")
+
+            print(f"\n  COMPONENT BREAKDOWN:")
+            print(f"    • Earnings Surprise:    {row['Earnings_Surprise']:>6.2f} pts")
+            print(f"    • Price Reaction:       {row['Price_Reaction']:>6.2f} pts")
+            print(f"    • Drift Confirmation:   {row['Drift_Confirmation']:>6.2f} pts")
+            print(f"    • Earnings Quality:     {row['Earnings_Quality']:>6.2f} pts")
+            print(f"    • Contextual Factors:   {row['Contextual']:>6.2f} pts")
+
+            print(f"\n  CUMULATIVE ABNORMAL RETURNS (CAR):")
+            print(f"    • 1-day  CAR:  {row['CAR_1d']:>7.2%}")
+            print(f"    • 10-day CAR:  {row['CAR_10d']:>7.2%}")
+            print(f"    • 30-day CAR:  {row['CAR_30d']:>7.2%} {'✓ Significant' if row['CAR_30d_Significant'] else ''}")
+            print(f"    • 60-day CAR:  {row['CAR_60d']:>7.2%} {'✓ Significant' if row['CAR_60d_Significant'] else ''}")
+            print(f"    • 90-day CAR:  {row['CAR_90d']:>7.2%} {'✓ Significant' if row['CAR_90d_Significant'] else ''}")
+
+            print(f"\n  MARKET MODEL:")
+            print(f"    • Alpha (α):   {row['Alpha']:>7.4f}")
+            print(f"    • Beta (β):    {row['Beta']:>7.4f}")
+            print(f"    • R-squared:   {row['R_Squared']:>7.4f}")
+
+            # Interpretation
+            print(f"\n  KEY INSIGHTS:")
+
+            # Drift direction
+            if row['CAR_90d'] > 0.05:
+                drift_msg = f"    ✓ Strong positive drift detected (+{row['CAR_90d']:.2%} over 90 days)"
+            elif row['CAR_90d'] > 0.02:
+                drift_msg = f"    • Moderate positive drift (+{row['CAR_90d']:.2%} over 90 days)"
+            elif row['CAR_90d'] < -0.05:
+                drift_msg = f"    ✗ Strong negative drift detected ({row['CAR_90d']:.2%} over 90 days)"
+            elif row['CAR_90d'] < -0.02:
+                drift_msg = f"    • Moderate negative drift ({row['CAR_90d']:.2%} over 90 days)"
+            else:
+                drift_msg = f"    • Minimal drift ({row['CAR_90d']:.2%} over 90 days)"
+            print(drift_msg)
+
+            # Beta interpretation
+            if row['Beta'] > 1.2:
+                beta_msg = "    • High beta (>1.2): Stock more volatile than market"
+            elif row['Beta'] > 0.8:
+                beta_msg = "    • Moderate beta (0.8-1.2): Stock moves with market"
+            else:
+                beta_msg = "    • Low beta (<0.8): Stock less volatile than market"
+            print(beta_msg)
+
+            # Model fit
+            if row['R_Squared'] > 0.5:
+                fit_msg = f"    • Strong market model fit (R²={row['R_Squared']:.2%})"
+            elif row['R_Squared'] > 0.3:
+                fit_msg = f"    • Moderate market model fit (R²={row['R_Squared']:.2%})"
+            else:
+                fit_msg = f"    • Weak market model fit (R²={row['R_Squared']:.2%}) - idiosyncratic factors dominate"
+            print(fit_msg)
+
+            # Score interpretation
+            if row['Composite_Score'] >= 60:
+                score_msg = "    ✓ Strong PEAD opportunity - high confidence for trading"
+            elif row['Composite_Score'] >= 40:
+                score_msg = "    • Moderate PEAD signal - consider with other factors"
+            elif row['Composite_Score'] >= 20:
+                score_msg = "    • Weak PEAD signal - limited actionable opportunity"
+            else:
+                score_msg = "    ✗ Negative or no PEAD signal - avoid position"
+            print(score_msg)
+
+        print(f"\n{'='*100}")
+        print(f"RANKING SUMMARY")
+        print(f"{'='*100}\n")
+
+        # Quick summary table
+        summary_cols = ['Symbol', 'Composite_Score', 'Rating', 'CAR_90d', 'Beta', 'R_Squared']
+        print(results_df[summary_cols].to_string(index=False))
+
+        print(f"\n{'='*100}")
+        print(f"Detailed report saved to: {output_path}")
+        print(f"Individual stock visualizations in: {args.output}/[SYMBOL]/")
+        print(f"{'='*100}\n")
     else:
         print("\nNo successful analyses.\n")
 
