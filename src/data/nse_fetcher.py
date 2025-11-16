@@ -33,8 +33,9 @@ class NSEDataFetcher:
             self.nse = NSE(download_folder=download_folder)
             logger.info(f"NSE connection established (download_folder: {download_folder})")
         except Exception as e:
-            logger.error(f"Failed to initialize NSE: {e}")
-            raise
+            logger.warning(f"Failed to initialize NSE: {e}")
+            logger.warning("NSE data source unavailable, will use Yahoo Finance fallback")
+            self.nse = None
 
     def get_recent_announcements(self, n: int = 10) -> pd.DataFrame:
         """
@@ -53,6 +54,10 @@ class NSEDataFetcher:
         pd.DataFrame
             DataFrame with announcement details (may be empty)
         """
+        if self.nse is None:
+            logger.warning("NSE not available, returning empty announcements")
+            return pd.DataFrame()
+
         try:
             logger.info(f"Attempting to fetch {n} announcements from NSE")
 
@@ -138,6 +143,10 @@ class NSEDataFetcher:
         pd.DataFrame or None
             DataFrame with OHLCV data
         """
+        if self.nse is None:
+            logger.warning("NSE not available, returning None for stock data")
+            return None
+
         try:
             logger.info(f"Fetching stock data for {symbol} from {start_date} to {end_date}")
 
@@ -204,6 +213,10 @@ class NSEDataFetcher:
         dict
             Company information
         """
+        if self.nse is None:
+            logger.warning("NSE not available, returning empty company info")
+            return {}
+
         try:
             info = self.nse.get_quote(symbol)
             return info if info else {}
@@ -234,6 +247,10 @@ class NSEDataFetcher:
         pd.DataFrame or None
             Index data
         """
+        if self.nse is None:
+            logger.warning("NSE not available, returning None for index data")
+            return None
+
         try:
             logger.info(f"Fetching index data for {index}")
 
@@ -275,6 +292,10 @@ class NSEDataFetcher:
         pd.DataFrame
             Corporate actions data
         """
+        if self.nse is None:
+            logger.warning("NSE not available, returning empty corporate actions")
+            return pd.DataFrame()
+
         try:
             actions = self.nse.get_corporate_actions(symbol)
             if actions:
