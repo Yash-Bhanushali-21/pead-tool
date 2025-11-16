@@ -1,0 +1,32 @@
+"""
+PEAD Tool Package Setup
+"""
+from setuptools import setup, find_packages
+
+setup(
+    name="pead-tool",
+    version="1.0.0",
+    description="Post-Earnings Announcement Drift Analysis for Indian Equity Markets",
+    author="Quant Team",
+    packages=find_packages(),
+    install_requires=[
+        'numpy>=1.24.0',
+        'pandas>=2.0.0',
+        'scipy>=1.10.0',
+        'statsmodels>=0.14.0',
+        'yfinance>=0.2.28',
+        'nse>=0.1.0',
+        'requests>=2.31.0',
+        'beautifulsoup4>=4.12.0',
+        'PyPDF2>=3.0.0',
+        'pdfplumber>=0.10.0',
+        'python-dateutil>=2.8.2',
+        'matplotlib>=3.7.0',
+        'seaborn>=0.12.0',
+        'tabulate>=0.9.0',
+        'tqdm>=4.65.0',
+        'textblob>=0.17.1',
+        'scikit-learn>=1.3.0',
+    ],
+    python_requires='>=3.8',
+)

@@ -5,10 +5,16 @@ Example Usage of PEAD Tool
 This script demonstrates various ways to use the PEAD analysis tool
 """
 
+import sys
+from pathlib import Path
 from datetime import datetime
+import logging
+
+# Add project root to Python path
+sys.path.insert(0, str(Path(__file__).parent))
+
 from src.analysis.pead_analyzer import PEADAnalyzer
 from src.config.settings import config
-import logging
 
 # Setup logging
 logging.basicConfig(

@@ -14,6 +14,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Add project root to Python path
+sys.path.insert(0, str(Path(__file__).parent))
+
 from src.analysis.pead_analyzer import PEADAnalyzer
 from src.config.settings import config
 

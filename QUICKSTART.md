@@ -2,21 +2,37 @@
 
 ## Installation (5 minutes)
 
+### Recommended: Development Install
+
 ```bash
 # 1. Clone repository
 git clone <repository-url>
 cd pead-tool
 
 # 2. Create virtual environment (recommended)
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-# 3. Install dependencies
-pip install -r requirements.txt
+# 3. Install in development mode
+pip install -e .
 
 # 4. Verify installation
-python -c "import src; print('Installation successful!')"
+python -c "from src.analysis.pead_analyzer import PEADAnalyzer; print('✅ Installation successful!')"
 ```
+
+### Alternative: Direct Install
+
+```bash
+# Steps 1-2 same as above
+
+# 3. Install dependencies only
+pip install -r requirements.txt
+
+# 4. Run directly (scripts handle Python path automatically)
+python main.py --help
+```
+
+**Having issues?** See [INSTALL.md](INSTALL.md) for troubleshooting.
 
 ## First Analysis (2 minutes)
 
