@@ -7,12 +7,12 @@ import numpy as np
 from typing import Dict, Optional
 import logging
 
-from .earnings_surprise import EarningsSurpriseScorer
-from .price_reaction import PriceReactionScorer
-from .drift_confirmation import DriftConfirmationScorer
-from .earnings_quality import EarningsQualityScorer
-from .contextual import ContextualScorer
-from ..config.settings import config
+from src.earnings_surprise import EarningsSurpriseScorer
+from src.price_reaction import PriceReactionScorer
+from src.drift_confirmation import DriftConfirmationScorer
+from src.earnings_quality import EarningsQualityScorer
+from src.contextual import ContextualScorer
+from src.config.settings import config
 
 logger = logging.getLogger(__name__)
 

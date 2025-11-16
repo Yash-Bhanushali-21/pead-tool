@@ -1,3 +1,3 @@
-from .settings import Config
+from src.config.settings import Config
 
 __all__ = ['Config']

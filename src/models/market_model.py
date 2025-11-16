@@ -10,7 +10,7 @@ from typing import Tuple, Dict, Optional
 import logging
 from datetime import datetime
 
-from ..config.settings import config
+from src.config.settings import config
 
 logger = logging.getLogger(__name__)
 
