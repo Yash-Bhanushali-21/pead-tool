@@ -151,7 +151,8 @@ class NSEDataFetcher:
             logger.info(f"Fetching stock data for {symbol} from {start_date} to {end_date}")
 
             # NSE package provides historical data
-            data = self.nse.get_hist(
+            # Correct method name: fetch_equity_historical_data
+            data = self.nse.fetch_equity_historical_data(
                 symbol=symbol,
                 from_date=start_date.strftime('%d-%m-%Y'),
                 to_date=end_date.strftime('%d-%m-%Y')
@@ -218,7 +219,8 @@ class NSEDataFetcher:
             return {}
 
         try:
-            info = self.nse.get_quote(symbol)
+            # Correct method name: quote or equityQuote
+            info = self.nse.quote(symbol)
             return info if info else {}
         except Exception as e:
             logger.error(f"Error fetching company info for {symbol}: {e}")
@@ -254,9 +256,9 @@ class NSEDataFetcher:
         try:
             logger.info(f"Fetching index data for {index}")
 
-            # For indices, we might need to use a different approach
-            # NSE package may have limitations for index historical data
-            data = self.nse.get_hist(
+            # For indices, use fetch_historical_index_data
+            # NSE package has separate method for index data
+            data = self.nse.fetch_historical_index_data(
                 symbol=index,
                 from_date=start_date.strftime('%d-%m-%Y'),
                 to_date=end_date.strftime('%d-%m-%Y')
