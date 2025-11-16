@@ -62,6 +62,12 @@ class DriftConfirmationScorer:
             'total': 0
         }
 
+        # Normalize timezone - match announcement_date timezone to stock_data.index
+        if stock_data.index.tz is not None and announcement_date.tzinfo is None:
+            announcement_date = pd.Timestamp(announcement_date).tz_localize(stock_data.index.tz)
+        elif stock_data.index.tz is None and announcement_date.tzinfo is not None:
+            announcement_date = pd.Timestamp(announcement_date).tz_localize(None)
+
         # 1. CAR Magnitude (max 8 points)
         scores['car_magnitude'] = self._score_car_magnitude(car_data)
 
