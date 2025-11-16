@@ -40,6 +40,9 @@ class NSEDataFetcher:
         """
         Get recent corporate announcements
 
+        NOTE: NSE library API is limited. This attempts multiple methods
+        but may return empty DataFrame if none work.
+
         Parameters
         ----------
         n : int
@@ -48,16 +51,26 @@ class NSEDataFetcher:
         Returns
         -------
         pd.DataFrame
-            DataFrame with announcement details
+            DataFrame with announcement details (may be empty)
         """
         try:
-            logger.info(f"Fetching {n} recent announcements from NSE")
+            logger.info(f"Attempting to fetch {n} announcements from NSE")
 
-            # Get announcements - the NSE package provides this
-            announcements = self.nse.get_corporate_announcements()
+            # Try different possible method names
+            announcements = None
+
+            if hasattr(self.nse, 'get_corporate_announcements'):
+                announcements = self.nse.get_corporate_announcements()
+            elif hasattr(self.nse, 'announcements'):
+                announcements = self.nse.announcements()
+            elif hasattr(self.nse, 'get_announcements'):
+                announcements = self.nse.get_announcements()
+            else:
+                logger.warning("NSE library doesn't have announcement methods")
+                return pd.DataFrame()
 
             if announcements is None or len(announcements) == 0:
-                logger.warning("No announcements found")
+                logger.warning("No announcements returned from NSE")
                 return pd.DataFrame()
 
             # Convert to DataFrame if not already

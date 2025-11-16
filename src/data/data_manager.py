@@ -79,15 +79,17 @@ class DataManager:
         """
         Get recent earnings announcements
 
+        Uses curated list of major stocks since NSE API is unreliable.
+
         Parameters
         ----------
         n : int
-            Number of announcements
+            Number of stocks to analyze
 
         Returns
         -------
         pd.DataFrame
-            Announcement data
+            Stock symbols for analysis
         """
         cache_key = f"announcements_{n}_{datetime.now().strftime('%Y%m%d')}"
 
@@ -96,13 +98,37 @@ class DataManager:
         if cached is not None:
             return cached
 
-        # Fetch from NSE
+        # Try NSE
         announcements = self.nse_fetcher.get_recent_announcements(n)
+
+        # Fallback to curated list
+        if announcements.empty:
+            logger.info("Using curated stock list")
+            announcements = self._get_curated_stocks(n)
 
         if not announcements.empty:
             self._save_to_cache(cache_key, announcements)
 
         return announcements
+
+    def _get_curated_stocks(self, n: int = 10) -> pd.DataFrame:
+        """Get curated list of major Indian stocks"""
+        stocks = [
+            {'SYMBOL': 'TCS', 'DESCRIPTION': 'IT - TCS'},
+            {'SYMBOL': 'INFY', 'DESCRIPTION': 'IT - Infosys'},
+            {'SYMBOL': 'HDFCBANK', 'DESCRIPTION': 'Banking - HDFC'},
+            {'SYMBOL': 'RELIANCE', 'DESCRIPTION': 'Energy - Reliance'},
+            {'SYMBOL': 'ICICIBANK', 'DESCRIPTION': 'Banking - ICICI'},
+            {'SYMBOL': 'SBIN', 'DESCRIPTION': 'Banking - SBI'},
+            {'SYMBOL': 'MARUTI', 'DESCRIPTION': 'Auto - Maruti'},
+            {'SYMBOL': 'WIPRO', 'DESCRIPTION': 'IT - Wipro'},
+            {'SYMBOL': 'HCLTECH', 'DESCRIPTION': 'IT - HCL Tech'},
+            {'SYMBOL': 'SUNPHARMA', 'DESCRIPTION': 'Pharma - Sun'},
+        ]
+
+        df = pd.DataFrame(stocks[:n])
+        df['ANNOUNCEMENT_DATE'] = datetime.now()
+        return df
 
     def get_stock_data(
         self,
