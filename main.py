@@ -107,9 +107,7 @@ def _get_latest_announcement_date(symbol: str, data_manager):
 
         # Method 4: Fall back to curated list
         print(f"  Checking curated stock list...")
-        from src.data.data_manager import DataManager
-        dm = DataManager(use_cache=False)
-        curated = dm._get_curated_stocks(n=20)
+        curated = data_manager._get_curated_stocks(n=20)
         if not curated.empty and 'SYMBOL' in curated.columns:
             match = curated[curated['SYMBOL'].str.upper() == symbol.upper()]
             if not match.empty and 'ANNOUNCEMENT_DATE' in match.columns:
