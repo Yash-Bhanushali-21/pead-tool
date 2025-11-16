@@ -80,6 +80,12 @@ class AbnormalReturns:
             'market_return': market_returns
         }).dropna()
 
+        # Handle timezone for announcement_date
+        if data.index.tz is not None and announcement_date.tzinfo is None:
+            announcement_date = pd.Timestamp(announcement_date).tz_localize(data.index.tz)
+        elif data.index.tz is None and announcement_date.tzinfo is not None:
+            announcement_date = pd.Timestamp(announcement_date).tz_localize(None)
+
         # Calculate expected returns using market model
         data['expected_return'] = (
             self.market_model.alpha +

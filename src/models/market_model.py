@@ -68,6 +68,14 @@ class MarketModel:
             'market': market_returns
         }).dropna()
 
+        # Convert announcement_date to timezone-aware if data has timezone
+        if data.index.tz is not None and announcement_date.tzinfo is None:
+            # Make announcement_date timezone-aware to match data
+            announcement_date = pd.Timestamp(announcement_date).tz_localize(data.index.tz)
+        elif data.index.tz is None and announcement_date.tzinfo is not None:
+            # Remove timezone from announcement_date if data is timezone-naive
+            announcement_date = pd.Timestamp(announcement_date).tz_localize(None)
+
         # Get estimation window (days before announcement)
         estimation_data = data[data.index < announcement_date].tail(estimation_window)
 
