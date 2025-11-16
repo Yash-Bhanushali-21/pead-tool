@@ -12,8 +12,8 @@ import pickle
 import os
 from pathlib import Path
 
-from src.nse_fetcher import NSEDataFetcher
-from src.yahoo_fetcher import YahooDataFetcher
+from src.data.nse_fetcher import NSEDataFetcher
+from src.data.yahoo_fetcher import YahooDataFetcher
 from src.config.settings import config
 
 logger = logging.getLogger(__name__)

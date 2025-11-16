@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple, Optional
 import logging
 from scipy import stats
 
-from src.abnormal_returns import AbnormalReturns
+from src.models.abnormal_returns import AbnormalReturns
 from src.config.settings import config
 
 logger = logging.getLogger(__name__)

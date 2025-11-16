@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 from scipy import stats
 
-from src.market_model import MarketModel
+from src.models.market_model import MarketModel
 from src.config.settings import config
 
 logger = logging.getLogger(__name__)
