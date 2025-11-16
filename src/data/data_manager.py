@@ -124,11 +124,11 @@ class DataManager:
 
     def _get_curated_stocks(self, n: int = 10) -> pd.DataFrame:
         """
-        Get curated list of major Indian stocks with Q2 FY25 announcement dates
+        Get curated list of major Indian stocks with Q2 FY26 announcement dates
         """
         stocks = [
-            # Q2 FY25 results (Oct-Nov 2024) - recent but with post-announcement data
-            {'SYMBOL': 'TCS', 'DESCRIPTION': 'IT - TCS', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 10)},
+            # Q2 FY26 results (Oct-Nov 2025) - recent but with post-announcement data
+            {'SYMBOL': 'TCS', 'DESCRIPTION': 'IT - TCS', 'ANNOUNCEMENT_DATE': datetime(2025, 10, 9)},
             {'SYMBOL': 'INFY', 'DESCRIPTION': 'IT - Infosys', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 17)},
             {'SYMBOL': 'HDFCBANK', 'DESCRIPTION': 'Banking - HDFC', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 19)},
             {'SYMBOL': 'RELIANCE', 'DESCRIPTION': 'Energy - Reliance', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 14)},
@@ -144,7 +144,7 @@ class DataManager:
         # Convert to pandas datetime
         df['ANNOUNCEMENT_DATE'] = pd.to_datetime(df['ANNOUNCEMENT_DATE'])
 
-        logger.info(f"Using {len(df)} stocks with Q2 FY25 dates (Oct-Nov 2024)")
+        logger.info(f"Using {len(df)} stocks with Q2 FY26 dates (Oct-Nov 2025)")
         return df
 
     def get_stock_data(
