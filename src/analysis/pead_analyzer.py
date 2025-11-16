@@ -80,6 +80,14 @@ class PEADAnalyzer:
         """
         logger.info(f"Analyzing {symbol} announcement on {announcement_date}")
 
+        # Check for future announcement dates (indicates stale cache)
+        if pd.Timestamp(announcement_date) > pd.Timestamp.now():
+            logger.error(
+                f"Announcement date {announcement_date} is in the future! "
+                f"This indicates stale/corrupted cache. Please clear cache: "
+                f"rm -rf data/cache/*"
+            )
+
         results = {
             'symbol': symbol,
             'announcement_date': announcement_date,
@@ -448,7 +456,7 @@ class PEADAnalyzer:
         )
 
         # 3. AR plot
-        if hasattr(ar_data, 'plot'):
+        if isinstance(ar_data, pd.DataFrame) and not ar_data.empty and 'AR' in ar_data.columns:
             import matplotlib.pyplot as plt
             fig, ax = plt.subplots(figsize=(12, 6))
             ar_data['AR'].plot(ax=ax, title=f'{symbol} - Abnormal Returns')
@@ -457,14 +465,20 @@ class PEADAnalyzer:
             plt.tight_layout()
             plt.savefig(output_path / f'{symbol}_ar.png', dpi=300, bbox_inches='tight')
             plt.close()
+            logger.info(f"Plot saved to {output_path / f'{symbol}_ar.png'}")
+        else:
+            logger.warning(f"Skipping AR plot - no abnormal returns data available")
 
         # 4. CAR evolution
-        from src.models.car import CumulativeAbnormalReturns
-        car_obj = CumulativeAbnormalReturns()
-        car_obj.cars = car_data
-        car_obj.plot_car_evolution(
-            save_path=str(output_path / f'{symbol}_car.png')
-        )
+        if car_data and len(car_data) > 0:
+            from src.models.car import CumulativeAbnormalReturns
+            car_obj = CumulativeAbnormalReturns()
+            car_obj.cars = car_data
+            car_obj.plot_car_evolution(
+                save_path=str(output_path / f'{symbol}_car.png')
+            )
+        else:
+            logger.warning(f"Skipping CAR plot - no CAR data available")
 
     def _extract_summary(self, result: Dict) -> Dict:
         """
