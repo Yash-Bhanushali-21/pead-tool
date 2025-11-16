@@ -15,11 +15,23 @@ logger = logging.getLogger(__name__)
 class NSEDataFetcher:
     """Fetch data from NSE for equity and announcements"""
 
-    def __init__(self):
-        """Initialize NSE connection"""
+    def __init__(self, download_folder: str = './data/nse_downloads'):
+        """
+        Initialize NSE connection
+
+        Parameters
+        ----------
+        download_folder : str
+            Folder to store NSE downloaded files
+        """
         try:
-            self.nse = NSE()
-            logger.info("NSE connection established")
+            # Create download folder if it doesn't exist
+            import os
+            os.makedirs(download_folder, exist_ok=True)
+
+            # Initialize NSE with download folder
+            self.nse = NSE(download_folder=download_folder)
+            logger.info(f"NSE connection established (download_folder: {download_folder})")
         except Exception as e:
             logger.error(f"Failed to initialize NSE: {e}")
             raise
