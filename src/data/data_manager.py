@@ -101,6 +101,17 @@ class DataManager:
         # Try NSE
         announcements = self.nse_fetcher.get_recent_announcements(n)
 
+        # Validate announcement dates - reject future dates
+        if not announcements.empty and 'ANNOUNCEMENT_DATE' in announcements.columns:
+            now = pd.Timestamp.now()
+            future_count = (pd.to_datetime(announcements['ANNOUNCEMENT_DATE']) > now).sum()
+            if future_count > 0:
+                logger.warning(
+                    f"NSE returned {future_count} announcements with future dates, "
+                    f"using curated list instead"
+                )
+                announcements = pd.DataFrame()
+
         # Fallback to curated list
         if announcements.empty:
             logger.info("Using curated stock list")
