@@ -112,22 +112,28 @@ class DataManager:
         return announcements
 
     def _get_curated_stocks(self, n: int = 10) -> pd.DataFrame:
-        """Get curated list of major Indian stocks"""
+        """
+        Get curated list of major Indian stocks with Q2 FY25 announcement dates
+        """
         stocks = [
-            {'SYMBOL': 'TCS', 'DESCRIPTION': 'IT - TCS'},
-            {'SYMBOL': 'INFY', 'DESCRIPTION': 'IT - Infosys'},
-            {'SYMBOL': 'HDFCBANK', 'DESCRIPTION': 'Banking - HDFC'},
-            {'SYMBOL': 'RELIANCE', 'DESCRIPTION': 'Energy - Reliance'},
-            {'SYMBOL': 'ICICIBANK', 'DESCRIPTION': 'Banking - ICICI'},
-            {'SYMBOL': 'SBIN', 'DESCRIPTION': 'Banking - SBI'},
-            {'SYMBOL': 'MARUTI', 'DESCRIPTION': 'Auto - Maruti'},
-            {'SYMBOL': 'WIPRO', 'DESCRIPTION': 'IT - Wipro'},
-            {'SYMBOL': 'HCLTECH', 'DESCRIPTION': 'IT - HCL Tech'},
-            {'SYMBOL': 'SUNPHARMA', 'DESCRIPTION': 'Pharma - Sun'},
+            # Q2 FY25 results (Oct-Nov 2024) - recent but with post-announcement data
+            {'SYMBOL': 'TCS', 'DESCRIPTION': 'IT - TCS', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 10)},
+            {'SYMBOL': 'INFY', 'DESCRIPTION': 'IT - Infosys', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 17)},
+            {'SYMBOL': 'HDFCBANK', 'DESCRIPTION': 'Banking - HDFC', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 19)},
+            {'SYMBOL': 'RELIANCE', 'DESCRIPTION': 'Energy - Reliance', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 14)},
+            {'SYMBOL': 'ICICIBANK', 'DESCRIPTION': 'Banking - ICICI', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 26)},
+            {'SYMBOL': 'SBIN', 'DESCRIPTION': 'Banking - SBI', 'ANNOUNCEMENT_DATE': datetime(2024, 11, 2)},
+            {'SYMBOL': 'MARUTI', 'DESCRIPTION': 'Auto - Maruti', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 24)},
+            {'SYMBOL': 'WIPRO', 'DESCRIPTION': 'IT - Wipro', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 16)},
+            {'SYMBOL': 'HCLTECH', 'DESCRIPTION': 'IT - HCL Tech', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 14)},
+            {'SYMBOL': 'SUNPHARMA', 'DESCRIPTION': 'Pharma - Sun', 'ANNOUNCEMENT_DATE': datetime(2024, 10, 30)},
         ]
 
         df = pd.DataFrame(stocks[:n])
-        df['ANNOUNCEMENT_DATE'] = datetime.now()
+        # Convert to pandas datetime
+        df['ANNOUNCEMENT_DATE'] = pd.to_datetime(df['ANNOUNCEMENT_DATE'])
+
+        logger.info(f"Using {len(df)} stocks with Q2 FY25 dates (Oct-Nov 2024)")
         return df
 
     def get_stock_data(
