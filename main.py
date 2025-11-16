@@ -48,6 +48,82 @@ def setup_logging(verbose: bool = False):
     logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 
+def _get_latest_announcement_date(symbol: str, data_manager):
+    """
+    Auto-detect latest earnings announcement date for a symbol
+
+    Parameters
+    ----------
+    symbol : str
+        Stock symbol
+    data_manager : DataManager
+        Data manager instance
+
+    Returns
+    -------
+    datetime or None
+        Latest announcement date, or None if not found
+    """
+    import pandas as pd
+    import yfinance as yf
+
+    try:
+        # Method 1: Try NSE announcements
+        nse_announcements = data_manager.nse_fetcher.get_recent_announcements(n=100)
+        if not nse_announcements.empty and 'SYMBOL' in nse_announcements.columns:
+            symbol_announcements = nse_announcements[
+                nse_announcements['SYMBOL'].str.upper() == symbol.upper()
+            ]
+            if not symbol_announcements.empty and 'ANNOUNCEMENT_DATE' in symbol_announcements.columns:
+                latest = pd.to_datetime(symbol_announcements['ANNOUNCEMENT_DATE']).max()
+                if pd.notna(latest):
+                    print(f"  Found from NSE: {latest.date()}")
+                    return latest
+
+        # Method 2: Try Yahoo Finance earnings calendar
+        print(f"  Checking Yahoo Finance earnings calendar...")
+        ticker = yf.Ticker(f"{symbol}.NS")
+
+        # Get earnings dates
+        if hasattr(ticker, 'earnings_dates') and ticker.earnings_dates is not None:
+            earnings_dates = ticker.earnings_dates
+            if not earnings_dates.empty:
+                # Get most recent past earnings date
+                now = pd.Timestamp.now()
+                past_earnings = earnings_dates[earnings_dates.index <= now]
+                if not past_earnings.empty:
+                    latest = past_earnings.index[0]
+                    print(f"  Found from Yahoo earnings calendar: {latest.date()}")
+                    return latest
+
+        # Method 3: Check ticker.calendar (quarterly earnings)
+        if hasattr(ticker, 'calendar') and ticker.calendar is not None:
+            calendar = ticker.calendar
+            if 'Earnings Date' in calendar:
+                earnings_date = pd.to_datetime(calendar['Earnings Date'])
+                if pd.notna(earnings_date):
+                    print(f"  Found from Yahoo calendar: {earnings_date.date()}")
+                    return earnings_date
+
+        # Method 4: Fall back to curated list
+        print(f"  Checking curated stock list...")
+        from src.data.data_manager import DataManager
+        dm = DataManager(use_cache=False)
+        curated = dm._get_curated_stocks(n=20)
+        if not curated.empty and 'SYMBOL' in curated.columns:
+            match = curated[curated['SYMBOL'].str.upper() == symbol.upper()]
+            if not match.empty and 'ANNOUNCEMENT_DATE' in match.columns:
+                latest = pd.to_datetime(match['ANNOUNCEMENT_DATE'].iloc[0])
+                print(f"  Found from curated list: {latest.date()}")
+                return latest
+
+        return None
+
+    except Exception as e:
+        print(f"  Error auto-detecting announcement date: {e}")
+        return None
+
+
 def analyze_recent(args):
     """
     Analyze recent announcements
@@ -107,10 +183,20 @@ def analyze_single(args):
     print(f"PEAD TOOL - Analyzing {args.symbol}")
     print("="*70 + "\n")
 
-    # Parse date
-    announcement_date = datetime.strptime(args.date, '%Y-%m-%d')
-
     analyzer = PEADAnalyzer(use_cache=not args.no_cache)
+
+    # Auto-detect announcement date if not provided
+    if args.date:
+        announcement_date = datetime.strptime(args.date, '%Y-%m-%d')
+        print(f"Using provided announcement date: {announcement_date.date()}\n")
+    else:
+        print(f"Auto-detecting latest announcement date for {args.symbol}...\n")
+        announcement_date = _get_latest_announcement_date(args.symbol, analyzer.data_manager)
+        if announcement_date is None:
+            print(f"\nError: Could not auto-detect announcement date for {args.symbol}")
+            print("Please provide the date manually using --date YYYY-MM-DD\n")
+            return
+        print(f"Latest announcement found: {announcement_date.date()}\n")
 
     result = analyzer.analyze_announcement(
         symbol=args.symbol,
@@ -370,8 +456,11 @@ Examples:
   # Analyze top 10 recent announcements
   python main.py --mode recent --top 10
 
-  # Analyze specific stock announcement
-  python main.py --mode single --symbol RELIANCE --date 2024-01-15
+  # Analyze specific stock with auto-detected latest announcement
+  python main.py --mode single --symbol TCS
+
+  # Analyze specific stock announcement with manual date
+  python main.py --mode single --symbol RELIANCE --date 2024-10-14
 
   # Analyze stocks from CSV file (stocks.csv)
   python main.py --mode batch --file stocks.csv
@@ -407,7 +496,7 @@ Examples:
     parser.add_argument(
         '--date',
         type=str,
-        help='Announcement date in YYYY-MM-DD format (for single mode)'
+        help='Announcement date in YYYY-MM-DD format (optional, auto-detects latest if not provided)'
     )
 
     parser.add_argument(
@@ -451,8 +540,9 @@ Examples:
 
     # Validate arguments
     if args.mode == 'single':
-        if not args.symbol or not args.date:
-            parser.error("--symbol and --date are required for single mode")
+        if not args.symbol:
+            parser.error("--symbol is required for single mode")
+        # --date is optional; will auto-detect if not provided
     elif args.mode == 'batch':
         if not Path(args.file).exists():
             parser.error(f"File not found: {args.file}")
