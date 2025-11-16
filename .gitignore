@@ -35,8 +35,8 @@ env/
 *~
 .DS_Store
 
-# Data and cache
-data/
+# Data and cache (but NOT src/data/ - that's source code!)
+/data/
 *.csv
 *.xlsx
 *.pdf
