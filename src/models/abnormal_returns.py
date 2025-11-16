@@ -106,10 +106,16 @@ class AbnormalReturns:
         self.abnormal_returns = event_data
         self._calculate_statistics()
 
-        logger.info(
-            f"Calculated {len(event_data)} abnormal returns for event window "
-            f"{event_window}"
-        )
+        if len(event_data) == 0:
+            logger.warning(
+                f"No data available for event window {event_window}. "
+                f"Announcement date might be too recent or in the future."
+            )
+        else:
+            logger.info(
+                f"Calculated {len(event_data)} abnormal returns for event window "
+                f"{event_window}"
+            )
 
         return event_data
 

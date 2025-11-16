@@ -57,6 +57,25 @@ class CumulativeAbnormalReturns:
         if windows is None:
             windows = config.CAR_WINDOWS
 
+        # Check if data is empty
+        if ar_data is None or len(ar_data) == 0:
+            logger.warning("No abnormal returns data available for CAR calculation")
+            # Return empty dict with zero CARs
+            for window in windows:
+                self.cars[window] = {
+                    'window': window,
+                    'car': 0,
+                    'car_pct': 0,
+                    'actual_days': 0,
+                    'mean_daily_ar': 0,
+                    'std_daily_ar': 0,
+                    't_statistic': 0,
+                    'p_value': 1.0,
+                    'significant': False,
+                    'annualized_return': 0
+                }
+            return self.cars
+
         if 'AR' not in ar_data.columns:
             raise ValueError("Input data must have 'AR' column")
 
