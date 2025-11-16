@@ -6,6 +6,7 @@ Post-Earnings Announcement Drift Analysis for Indian Equity Markets
 Usage:
     python main.py --mode recent --top 10
     python main.py --mode single --symbol RELIANCE --date 2024-01-15
+    python main.py --mode batch --file stocks.csv
 """
 
 import argparse
@@ -145,6 +146,92 @@ def analyze_single(args):
         print(f"\nAnalysis failed: {result.get('error', 'Unknown error')}\n")
 
 
+def analyze_batch(args):
+    """
+    Analyze batch of stocks from CSV file
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Command line arguments
+    """
+    import pandas as pd
+
+    print("\n" + "="*70)
+    print(f"PEAD TOOL - Batch Analysis from {args.file}")
+    print("="*70 + "\n")
+
+    # Read CSV file
+    try:
+        stocks_df = pd.read_csv(args.file)
+        required_cols = ['symbol', 'announcement_date']
+
+        if not all(col in stocks_df.columns for col in required_cols):
+            print(f"Error: CSV must have columns: {required_cols}")
+            return
+
+        print(f"Loaded {len(stocks_df)} stocks from {args.file}\n")
+
+    except Exception as e:
+        print(f"Error reading file: {e}")
+        return
+
+    # Analyze each stock
+    analyzer = PEADAnalyzer(use_cache=not args.no_cache)
+    results = []
+
+    for idx, row in stocks_df.iterrows():
+        symbol = row['symbol']
+        date_str = row['announcement_date']
+
+        try:
+            announcement_date = pd.to_datetime(date_str)
+
+            print(f"\n{idx+1}/{len(stocks_df)}: Analyzing {symbol} on {announcement_date.date()}")
+
+            result = analyzer.analyze_announcement(
+                symbol=symbol,
+                announcement_date=announcement_date,
+                visualize=args.visualize,
+                output_dir=args.output
+            )
+
+            if result['success']:
+                results.append({
+                    'Symbol': symbol,
+                    'Announcement_Date': announcement_date,
+                    'Composite_Score': result['composite_score']['score'],
+                    'Rating': result['composite_score']['rating'],
+                    'Confidence': result['composite_score']['confidence']
+                })
+            else:
+                print(f"   Failed: {result.get('error', 'Unknown error')}")
+
+        except Exception as e:
+            print(f"   Error: {e}")
+            continue
+
+    # Print summary
+    if results:
+        results_df = pd.DataFrame(results)
+        results_df = results_df.sort_values('Composite_Score', ascending=False)
+
+        print("\n" + "="*70)
+        print("BATCH ANALYSIS SUMMARY")
+        print("="*70 + "\n")
+        print(results_df.to_string(index=False))
+
+        # Save to CSV
+        output_path = Path(args.output) / 'batch_analysis_summary.csv'
+        results_df.to_csv(output_path, index=False)
+
+        print("\n" + "="*70)
+        print(f"Results saved to: {output_path}")
+        print("="*70 + "\n")
+    else:
+        print("\nNo successful analyses.\n")
+
+
 def main():
     """Main entry point"""
 
@@ -159,6 +246,9 @@ Examples:
   # Analyze specific stock announcement
   python main.py --mode single --symbol RELIANCE --date 2024-01-15
 
+  # Analyze stocks from CSV file (stocks.csv)
+  python main.py --mode batch --file stocks.csv
+
   # Run without cache
   python main.py --mode recent --top 5 --no-cache
 
@@ -169,9 +259,9 @@ Examples:
 
     parser.add_argument(
         '--mode',
-        choices=['recent', 'single'],
+        choices=['recent', 'single', 'batch'],
         required=True,
-        help='Analysis mode: recent announcements or single stock'
+        help='Analysis mode: recent announcements, single stock, or batch from CSV'
     )
 
     parser.add_argument(
@@ -191,6 +281,13 @@ Examples:
         '--date',
         type=str,
         help='Announcement date in YYYY-MM-DD format (for single mode)'
+    )
+
+    parser.add_argument(
+        '--file',
+        type=str,
+        default='stocks.csv',
+        help='CSV file with stocks to analyze (for batch mode)'
     )
 
     parser.add_argument(
@@ -229,6 +326,9 @@ Examples:
     if args.mode == 'single':
         if not args.symbol or not args.date:
             parser.error("--symbol and --date are required for single mode")
+    elif args.mode == 'batch':
+        if not Path(args.file).exists():
+            parser.error(f"File not found: {args.file}")
 
     # Create output directory
     Path(args.output).mkdir(parents=True, exist_ok=True)
@@ -239,6 +339,8 @@ Examples:
             analyze_recent(args)
         elif args.mode == 'single':
             analyze_single(args)
+        elif args.mode == 'batch':
+            analyze_batch(args)
 
     except KeyboardInterrupt:
         print("\n\nAnalysis interrupted by user.\n")
