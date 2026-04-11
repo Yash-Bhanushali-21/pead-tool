@@ -13,4 +13,5 @@ export type StreamEvent =
   | { type: "tool_result"; tool_call_id?: string | null; content_preview: string }
   | { type: "done"; output: string }
   | { type: "error"; message: string }
+  | { type: "session_ack"; session_id: string }
   | { type: string; [k: string]: unknown };

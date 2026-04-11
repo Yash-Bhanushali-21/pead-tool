@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict
 
-from src.config.settings import config
+from src.config.config import CONFIG, config
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ def generate_technical_verdict(api_result: Dict[str, Any]) -> Dict[str, Any]:
     """
     Returns ``{ "text": str, "model": str }`` or ``{ "error": str }`` / skipped.
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = CONFIG.get("OPENAI_API_KEY")
     if not api_key:
         return {
             "skipped": True,

@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
-from src.config.settings import config
+from src.config.config import CONFIG, config
 from src.news.collector import NewsArticle
 
 logger = logging.getLogger(__name__)
@@ -68,7 +67,7 @@ def _llm_synthesis(
     articles: List[NewsArticle],
     max_items: int = 35,
 ) -> Optional[Dict[str, Any]]:
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = CONFIG.get("OPENAI_API_KEY")
     if not api_key:
         return None
 

@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.analysis.pead_analyzer import PEADAnalyzer
-from src.config.settings import config
+from src.config.config import config
 from src.fundamentals import FundamentalAnalyzer
 
 

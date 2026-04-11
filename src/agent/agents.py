@@ -9,7 +9,7 @@ import asyncio
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import pandas as pd
 from pydantic_ai import Agent, RunContext
@@ -17,36 +17,57 @@ from pydantic_ai import Agent, RunContext
 from src.agent.announcements import get_latest_announcement_date
 from src.agent.deps import ResearchDeps
 from src.agent.serialize import compact_pead_for_llm, json_dumps_safe
-from src.config.settings import config
+from src.config.config import config
 from src.news.layer import run_news_sentiment_layer
-from src.trade_context.snapshot import fetch_light_trade_context
+from src.tools.executions import (
+    execute_document_pdf,
+    execute_execution_snapshot,
+    execute_fundamentals,
+    execute_recent_announcements,
+    execute_scoring_only,
+    execute_technical,
+    execute_trade_readiness_isolated,
+    execute_yahoo_calendar,
+)
 
 logger = logging.getLogger(__name__)
 
 COORDINATOR_INSTRUCTIONS = """You are the lead equity research coordinator for Indian NSE-listed stocks (institutional desk workflow — not regulated research).
 
-You work with specialist capabilities exposed as tools:
-- **News & sentiment scan** — RSS/Yahoo headlines + TextBlob / optional OpenAI blended score (`news_sentiment` JSON). Fast; no PEAD, CARs, or fundamentals. Use when the user asks for "news", "sentiment", "headlines", "news layer", or "scan the tape" on a symbol, or says to use the news/sentiment tool specifically.
-- Resolve the earnings/event anchor date when the user does not provide one.
-- Run the full PEAD + fundamentals + technical + optional news pipeline (heavy; use when a full event-study / valuation / CAR desk view is needed — not required for a pure news ask).
-- **Execution context snapshot** — fast liquidity / volatility / alignment screen from price history only (no full PEAD); use when the user asks about sizing context, tape quality, or risk before committing time to a full run.
-- **Yahoo calendar snippet** — best-effort next earnings / calendar fields (may be empty).
-- **Synthesis desk** — turns raw tool JSON into polished institutional prose (memos, "verdict", broker-style narrative framing).
+## Tools (same capabilities as the web **Tools** pages — you MUST call them when the user asks to "use the X tool", "run fundamentals", "technical on …", etc.)
+| User intent | Tool | Notes |
+|-------------|------|------|
+| Fundamentals / screening / ratios / Yahoo bundle | `run_fundamentals_screening` | Symbol only |
+| Technicals (RSI, MACD, MAs, pivots) | `run_technical_snapshot` | Defaults: PEAD event window, auto announcement date, include_chart on |
+| News & sentiment headlines | `run_news_and_sentiment` | Defaults: ~90d lookback, 80 articles |
+| Full PEAD + CAR + everything heavy | `run_full_pead_pipeline` | Optional announcement_date |
+| CARs + component scores only | `run_scoring_only_stack` | Optional announcement_date (else auto) |
+| Trade readiness pillars (isolated) | `run_trade_readiness_tool` | lookback_days default 200 |
+| Full execution / tape context JSON | `get_execution_context_snapshot` | Same as Tools → execution snapshot |
+| Yahoo earnings calendar | `get_yahoo_calendar_snippet` | |
+| Parse announcement PDF on disk | `run_document_pdf_parse` | **Requires** YYYY-MM-DD |
+| Top N recent NSE names batch | `run_recent_nse_announcements` | Slower; default top_n=8 |
+| Polish prose | `ask_synthesis_desk` | After you have JSON |
 
-News-first workflow (critical):
-1) If the user's ask is primarily about news/sentiment on one or more symbols, call `run_news_and_sentiment` for each symbol (default lookback ~90 days, max articles ~80 unless they specify otherwise).
-2) When they want a **verdict**, **summary**, **what it means**, **broker-style read**, **desk note**, **implications**, or similar — after you have the tool JSON, you MUST call `ask_synthesis_desk` and pass a single string that starts with the line `TASK: NEWS_DESK_VERDICT` followed by a newline, then the exact JSON from `run_news_and_sentiment` (or multiple JSON objects if they asked for multiple names). Do not invent scores; the synthesis model only sees what you pass.
-3) If they only wanted raw data, you may summarize briefly from the tool output without synthesis — but still no buy/sell language.
+## Confirmation UX (critical)
+- If the request is **ambiguous** (which symbol? which tool? missing PDF date?) or would **start an expensive run** without a clear symbol, **do not** call the tool yet. Reply with one short clarifying question.
+- When you need the user to confirm a specific run, end your message with **exactly one** line containing this HTML comment (valid JSON inside):
+  `<!--TOOL_CONFIRM:{"tool":"<id>","args":{...},"label":"short human label"}-->`
+  `<id>` must be one of: run_fundamentals_screening, run_technical_snapshot, run_scoring_only_stack, run_trade_readiness_tool, run_document_pdf_parse, run_recent_nse_announcements, run_news_and_sentiment, run_full_pead_pipeline, get_execution_context_snapshot, get_yahoo_calendar_snippet. Put all parameters needed to run the tool in `args` (e.g. {"symbol":"RELIANCE"}).
+- When the user replies **yes / y / sure / ok / confirm / go ahead / proceed** right after such a prompt (or clearly confirms), **call the tool** immediately with those args. If they say no, do not run it.
 
-Rules:
-- Never fabricate prices, CAR values, filing facts, or headline counts; only cite numbers that appear in tool outputs.
-- Never state or imply a buy/sell recommendation; frame outputs as research inputs and execution context only.
-- Do not claim you work for or represent any named asset manager or bank (e.g. BlackRock, Blackstone, Goldman) — keep a generic institutional voice.
-- Prefer one focused PEAD run per symbol unless the user explicitly compares multiple names or dates.
-- If data is missing or the tool returns an error, say so plainly and suggest what the user could change (symbol, date, or try again later).
-- Remind users that outputs are research aids, not investment advice.
+## News verdict workflow
+1) For news/sentiment-first asks, call `run_news_and_sentiment`.
+2) For a desk verdict on that output, call `ask_synthesis_desk` with a line `TASK: NEWS_DESK_VERDICT` then the JSON from the news tool.
 
-Be concise in the chat; use the synthesis desk when the user wants long-form prose or a verdict-style note."""
+## Rules
+- Never fabricate prices, CAR values, filing facts, or headline counts; only cite numbers from tool outputs.
+- Never state or imply a buy/sell recommendation.
+- Do not claim affiliation with any named asset manager or bank.
+- If a tool errors, say so plainly and suggest fixes (symbol, date, wider range).
+- Outputs are research aids, not investment advice.
+
+Be concise; use `ask_synthesis_desk` for long-form memos."""
 
 
 SYNTHESIS_INSTRUCTIONS = """You are the synthesis desk for an Indian equities research assistant.
@@ -213,16 +234,16 @@ def build_coordinator_agent(
         lookback_days: int = 200,
     ) -> str:
         """
-        Fast execution-context snapshot: volume vs average, ATR% / volatility band, technical stance.
-        Does **not** run PEAD, fundamentals, or news — use for a quick tape-quality check or before a full run.
+        Full execution-context snapshot (tape / liquidity / vol / alignment) — same as Tools → execution snapshot.
+        Does **not** run PEAD fundamentals pipeline — use for quick sizing / tape context.
         """
         sym = symbol.strip().upper()
 
         def _run():
-            return fetch_light_trade_context(
+            return execute_execution_snapshot(
+                ctx.deps.analyzer,
                 sym,
-                ctx.deps.analyzer.data_manager,
-                lookback_calendar_days=int(lookback_days),
+                int(lookback_days),
             )
 
         loop = asyncio.get_running_loop()
@@ -237,18 +258,135 @@ def build_coordinator_agent(
         """Best-effort Yahoo Finance calendar / earnings fields for the NSE symbol (often sparse)."""
 
         def _run():
-            import yfinance as yf
+            return execute_yahoo_calendar(symbol)
 
-            sym = symbol.strip().upper()
-            t = yf.Ticker(f"{sym}.NS")
-            out: dict = {"symbol": sym}
-            cal = getattr(t, "calendar", None)
-            if cal is not None and hasattr(cal, "empty") and not cal.empty:
-                out["calendar"] = cal.to_dict() if hasattr(cal, "to_dict") else str(cal)
-            ed = getattr(t, "earnings_dates", None)
-            if ed is not None and hasattr(ed, "empty") and not ed.empty:
-                out["earnings_dates_head"] = ed.head(6).to_string()
-            return out
+        loop = asyncio.get_running_loop()
+        return json_dumps_safe(await loop.run_in_executor(None, _run))
+
+    @coordinator.tool
+    async def run_fundamentals_screening(
+        ctx: RunContext[ResearchDeps],
+        symbol: str,
+    ) -> str:
+        """Fundamental screening (pillar scores, ratios) from Yahoo/NSE bundle — same as Tools → Fundamentals."""
+
+        def _run():
+            return execute_fundamentals(ctx.deps.analyzer, symbol)
+
+        loop = asyncio.get_running_loop()
+        return json_dumps_safe(await loop.run_in_executor(None, _run))
+
+    @coordinator.tool
+    async def run_technical_snapshot(
+        ctx: RunContext[ResearchDeps],
+        symbol: str,
+        price_window: Literal["pead_event", "explicit_range"] = "pead_event",
+        announcement_resolution: Literal["auto", "manual"] = "auto",
+        announcement_date: Optional[str] = None,
+        range_start: Optional[str] = None,
+        range_end: Optional[str] = None,
+        include_chart: bool = True,
+        include_ai_verdict: bool = False,
+    ) -> str:
+        """
+        Post-event technical snapshot (RSI, MACD, MAs, ATR%, pivot S/R) — same as Tools → Technical.
+        Defaults match the UI: PEAD event window + auto announcement date unless manual/range is set.
+        """
+
+        def _run():
+            return execute_technical(
+                ctx.deps.analyzer,
+                symbol=symbol.strip().upper(),
+                price_window=price_window,
+                announcement_resolution=announcement_resolution,
+                announcement_date=announcement_date,
+                range_start=range_start,
+                range_end=range_end,
+                include_chart=include_chart,
+                include_ai_verdict=include_ai_verdict,
+            )
+
+        loop = asyncio.get_running_loop()
+        out = await loop.run_in_executor(None, _run)
+        return json_dumps_safe(out)
+
+    @coordinator.tool
+    async def run_scoring_only_stack(
+        ctx: RunContext[ResearchDeps],
+        symbol: str,
+        announcement_date: Optional[str] = None,
+    ) -> str:
+        """CARs + five PEAD component scores + composite — same as Tools → Scoring (no full technical/news)."""
+
+        def _run():
+            return execute_scoring_only(ctx.deps.analyzer, symbol, announcement_date)
+
+        loop = asyncio.get_running_loop()
+        return json_dumps_safe(await loop.run_in_executor(None, _run))
+
+    @coordinator.tool
+    async def run_trade_readiness_tool(
+        ctx: RunContext[ResearchDeps],
+        symbol: str,
+        lookback_days: int = 200,
+    ) -> str:
+        """Trade readiness pillars only — same as Tools → Trade readiness (isolated)."""
+
+        def _run():
+            return execute_trade_readiness_isolated(
+                ctx.deps.analyzer,
+                symbol.strip().upper(),
+                int(lookback_days),
+            )
+
+        loop = asyncio.get_running_loop()
+        return json_dumps_safe(await loop.run_in_executor(None, _run))
+
+    @coordinator.tool
+    async def run_document_pdf_parse(
+        ctx: RunContext[ResearchDeps],
+        symbol: str,
+        announcement_date: str,
+    ) -> str:
+        """
+        Parse an announcement PDF already on disk (NSE naming convention) — same as Tools → Document PDF.
+        announcement_date: YYYY-MM-DD (required).
+        """
+
+        def _run():
+            return execute_document_pdf(
+                ctx.deps.analyzer,
+                symbol.strip().upper(),
+                announcement_date.strip(),
+            )
+
+        loop = asyncio.get_running_loop()
+        return json_dumps_safe(await loop.run_in_executor(None, _run))
+
+    @coordinator.tool
+    async def run_recent_nse_announcements(
+        ctx: RunContext[ResearchDeps],
+        top_n: int = 8,
+        include_news: bool = True,
+        visualize: bool = False,
+    ) -> str:
+        """
+        Batch scan of top N recent NSE announcements — same as Tools → PEAD recent (can be slow).
+        Writes under the chat agent output directory.
+        """
+
+        out_dir = str(ctx.deps.output_base)
+
+        def _run():
+            return execute_recent_announcements(
+                ctx.deps.analyzer,
+                int(top_n),
+                visualize=visualize,
+                output_dir=out_dir,
+                include_news=include_news,
+                news_lookback_days=config.NEWS_LOOKBACK_DAYS,
+                news_max_articles=config.NEWS_MAX_ARTICLES,
+            )
 
         loop = asyncio.get_running_loop()
         return json_dumps_safe(await loop.run_in_executor(None, _run))

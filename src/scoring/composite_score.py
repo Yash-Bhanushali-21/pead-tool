@@ -12,7 +12,7 @@ from src.scoring.price_reaction import PriceReactionScorer
 from src.scoring.drift_confirmation import DriftConfirmationScorer
 from src.scoring.earnings_quality import EarningsQualityScorer
 from src.scoring.contextual import ContextualScorer
-from src.config.settings import config
+from src.config.config import config
 
 logger = logging.getLogger(__name__)
 

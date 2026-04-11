@@ -11,7 +11,7 @@ from datetime import datetime
 from scipy import stats
 
 from src.models.market_model import MarketModel
-from src.config.settings import config
+from src.config.config import config
 
 logger = logging.getLogger(__name__)
 

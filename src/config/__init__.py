@@ -1,3 +1,1 @@
-# Configuration module
-# Import directly as needed:
-# from src.config.settings import Config, config
+# Configuration: ``from src.config.config import CONFIG, config``

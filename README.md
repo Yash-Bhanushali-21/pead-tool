@@ -2,7 +2,8 @@
 
 <!-- MEMORY_SNAPSHOT_START -->
 
-> **Living context:** Full log in [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md). Read it first; update it after substantive changes.
+> **Living context:** Read all **`memory-bank/*.md`** at task start (Cursor rule `memory-bank.mdc`). Dated **change log** and README snapshot source: [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md).
+> - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
 > - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
 > - **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
 > - **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.

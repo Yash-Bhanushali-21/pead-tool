@@ -1,0 +1,123 @@
+---
+description: Memory Bank — read all memory-bank/*.md at task start; update on milestones or when user says "update memory bank"; keep PROJECT_MEMORY + README sync.
+alwaysApply: true
+---
+
+# Memory Bank
+
+Context does not persist across sessions. Treat the **Memory Bank** as the durable project brain: at the **start of every non-trivial task**, read **all** Markdown files under `memory-bank/` (use the read tool) **before** planning or coding. Skipping this is not optional when those files exist.
+
+## New chats and file contents
+
+This rule is **always applied** (instructions are in context), but **the bodies of `memory-bank/*.md` are not auto-loaded** into the model. **Actually read** each core file at task start, or ask the user to **`@memory-bank`** / `@memory-bank/activeContext.md` (and siblings) so content is attached. Do not assume prior turns’ file contents are still present.
+
+## Location
+
+All Memory Bank files live in **`memory-bank/`** at the repository root (Markdown). Create the folder and core files during project initialization if they are missing.
+
+## Structure (hierarchy)
+
+```mermaid
+flowchart TD
+    PB[projectbrief.md] --> PC[productContext.md]
+    PB --> SP[systemPatterns.md]
+    PB --> TC[techContext.md]
+    PC --> AC[activeContext.md]
+    SP --> AC
+    TC --> AC
+    AC --> P[progress.md]
+```
+
+### Core files (required)
+
+| File | Purpose |
+|------|---------|
+| `projectbrief.md` | Foundation: scope, goals, requirements; source of truth for what “in scope” means |
+| `productContext.md` | Why the product exists, problems solved, expected behavior, UX goals |
+| `activeContext.md` | Current focus, recent changes, next steps, active decisions |
+| `systemPatterns.md` | Architecture, key technical decisions, patterns, component relationships |
+| `techContext.md` | Stack, dev setup, constraints, major dependencies |
+| `progress.md` | What works, what is left, status, known issues |
+
+### Additional context (optional)
+
+Add files or subfolders under `memory-bank/` when useful: feature specs, integrations, API notes, testing or deployment docs.
+
+## Workflows
+
+### Plan-first flow
+
+```mermaid
+flowchart TD
+    Start[Start] --> ReadFiles[Read Memory Bank]
+    ReadFiles --> CheckFiles{Files complete enough?}
+    CheckFiles -->|No| Plan[Create / gap-fill plan]
+    Plan --> Document[Document in chat]
+    CheckFiles -->|Yes| Verify[Verify context]
+    Verify --> Strategy[Develop strategy]
+    Strategy --> Present[Present approach]
+```
+
+### Execution flow
+
+```mermaid
+flowchart TD
+    Start[Start] --> Context[Read / refresh Memory Bank]
+    Context --> Update[Update Memory Bank as needed]
+    Update --> Rules[Update .cursor/rules if durable patterns warrant it]
+    Rules --> Execute[Execute task]
+    Execute --> Document[Document changes in Memory Bank]
+```
+
+Prefer updating **existing** project rules (e.g. `backend-python.mdc`, `frontend-web.mdc`) rather than inventing duplicate sources of truth. Propose rule edits explicitly when they change team-wide behavior.
+
+## When to update the Memory Bank
+
+1. Discovering new project-wide patterns or decisions  
+2. After significant implementation milestones  
+3. When the user says **update memory bank** — then **review every** Memory Bank file (even if some need no edits); prioritize `activeContext.md` and `progress.md`  
+4. When context is unclear and docs would prevent repeated rediscovery  
+
+```mermaid
+flowchart TD
+    Start[Update process]
+    subgraph Process
+        P1[Review ALL files]
+        P2[Document current state]
+        P3[Clarify next steps]
+        P4[Adjust .cursor/rules only if warranted]
+        P1 --> P2 --> P3 --> P4
+    end
+    Start --> Process
+```
+
+## Project intelligence (this repo)
+
+Long-lived preferences and “how we work here” belong in **`.cursor/rules/*.mdc`** (and `README` / PRDs where applicable). If a root **`.cursorrules`** file exists in a workspace, treat it as optional extra project memory—do not duplicate large sections of Memory Bank inside rules unless the user asks.
+
+## Planner mode
+
+When the user asks for **Planner Mode** or uses **`/plan`**:
+
+1. Reflect on the request and **inspect relevant code** to bound scope.  
+2. Before proposing a plan, ask **4–6 clarifying questions** grounded in what you found.  
+3. After answers, produce a **comprehensive plan** and wait for **explicit approval**.  
+4. After approval, implement the plan; after each phase or major step, state **what was completed**, **what comes next**, and **remaining phases**.
+
+This complements **PRD-gated workflows** if present: approval and explicit execution still apply per those rules.
+
+---
+
+## PEAD-tool: README snapshot + PROJECT_MEMORY.md
+
+This repository also maintains **`PROJECT_MEMORY.md`** with a **Current snapshot** and **Change log**. The README block between `<!-- MEMORY_SNAPSHOT_START -->` and `<!-- MEMORY_SNAPSHOT_END -->` is generated from that snapshot via:
+
+`python3 scripts/sync_memory_readme.py`
+
+After substantive changes to stack, entry points, or high-level behavior:
+
+1. Update **`memory-bank/`** (especially `activeContext.md`, `techContext.md`, `progress.md`).  
+2. Update **`PROJECT_MEMORY.md`** (Current snapshot + append Change log) so the README sync stays accurate.  
+3. Run **`scripts/sync_memory_readme.py`** (or edit the README markers manually).
+
+Do not remove `PROJECT_MEMORY.md`; keep it aligned with Memory Bank rather than diverging.

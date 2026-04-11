@@ -9,7 +9,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Literal, Optional
 
-import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -17,11 +16,18 @@ from pydantic import BaseModel, Field
 from src.agent.announcements import get_latest_announcement_date
 from src.agent.serialize import compact_pead_for_llm
 from src.analysis.pead_analyzer import PEADAnalyzer
-from src.config.settings import config
+from src.config.config import config
 from src.news.layer import run_news_sentiment_layer
-from src.technical.ai_verdict import generate_technical_verdict
-from src.trade_context.snapshot import fetch_light_trade_context
-
+from src.tools.executions import (
+    execute_document_pdf,
+    execute_execution_snapshot,
+    execute_fundamentals,
+    execute_recent_announcements,
+    execute_scoring_only,
+    execute_technical,
+    execute_trade_readiness_isolated,
+    execute_yahoo_calendar,
+)
 ROOT = Path(__file__).resolve().parent.parent
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
@@ -151,8 +157,9 @@ async def run_recent(body: PeadRecentRequest) -> dict[str, Any]:
     out_base.mkdir(parents=True, exist_ok=True)
 
     def _run():
-        return analyzer.analyze_recent_announcements(
-            n=body.top_n,
+        return execute_recent_announcements(
+            analyzer,
+            body.top_n,
             visualize=body.visualize,
             output_dir=str(out_base),
             include_news=body.include_news,
@@ -160,28 +167,7 @@ async def run_recent(body: PeadRecentRequest) -> dict[str, Any]:
             news_max_articles=body.news_max_articles,
         )
 
-    df, batch_root = await asyncio.to_thread(_run)
-
-    if df is None or df.empty:
-        return {
-            "mode": "recent",
-            "success": False,
-            "error": "No successful runs or no announcements from NSE feed.",
-            "rows": [],
-            "batch_root": str(batch_root) if batch_root else None,
-        }
-
-    df = df.replace({np.nan: None})
-    rows: List[dict[str, Any]] = df.to_dict(orient="records")
-    return {
-        "mode": "recent",
-        "success": True,
-        "error": None,
-        "top_n": body.top_n,
-        "row_count": len(rows),
-        "batch_root": str(batch_root) if batch_root else None,
-        "rows": rows,
-    }
+    return _json_safe(await asyncio.to_thread(_run))
 
 
 class ExecutionSnapshotRequest(BaseModel):
@@ -204,11 +190,7 @@ async def run_execution_snapshot(body: ExecutionSnapshotRequest) -> dict[str, An
     sym = body.symbol.strip().upper()
 
     def _run():
-        return fetch_light_trade_context(
-            sym,
-            analyzer.data_manager,
-            lookback_calendar_days=int(body.lookback_days),
-        )
+        return execute_execution_snapshot(analyzer, sym, body.lookback_days)
 
     return await asyncio.to_thread(_run)
 
@@ -218,18 +200,7 @@ async def run_yahoo_calendar(body: YahooCalendarRequest) -> dict[str, Any]:
     """Best-effort Yahoo Finance calendar / earnings_dates for NSE symbol."""
 
     def _run():
-        import yfinance as yf
-
-        sym = body.symbol.strip().upper()
-        t = yf.Ticker(f"{sym}.NS")
-        out: dict[str, Any] = {"symbol": sym, "yahoo_ticker": f"{sym}.NS"}
-        cal = getattr(t, "calendar", None)
-        if cal is not None and hasattr(cal, "empty") and not cal.empty:
-            out["calendar"] = cal.to_dict() if hasattr(cal, "to_dict") else str(cal)
-        ed = getattr(t, "earnings_dates", None)
-        if ed is not None and hasattr(ed, "empty") and not ed.empty:
-            out["earnings_dates_head"] = ed.head(12).to_string()
-        return out
+        return execute_yahoo_calendar(body.symbol)
 
     return await asyncio.to_thread(_run)
 
@@ -303,8 +274,7 @@ async def run_fundamentals(body: SymbolToolRequest) -> dict[str, Any]:
     sym = body.symbol.strip().upper()
 
     def _run():
-        bundle = analyzer.data_manager.get_company_fundamentals(sym)
-        return analyzer.fundamental_analyzer.analyze(sym, bundle)
+        return execute_fundamentals(analyzer, sym)
 
     return _json_safe(await asyncio.to_thread(_run))
 
@@ -333,72 +303,21 @@ async def run_technical(body: TechnicalToolRequest) -> dict[str, Any]:
                 )
 
     def _run() -> dict[str, Any]:
-        stock_data: Optional[pd.DataFrame] = None
-        out_base: dict[str, Any] = {
-            "symbol": sym,
-            "price_window": body.price_window,
-        }
-
-        if body.price_window == "explicit_range":
-            start_dt = pd.to_datetime(body.range_start).to_pydatetime()
-            end_dt = pd.to_datetime(body.range_end).to_pydatetime()
-            if start_dt > end_dt:
-                return {
-                    "success": False,
-                    "error": "range_start must be on or before range_end.",
-                    **out_base,
-                    "range_start": body.range_start,
-                    "range_end": body.range_end,
-                }
-            stock_data = analyzer.data_manager.get_stock_data(sym, start_dt, end_dt)
-            out_base["range_start"] = body.range_start
-            out_base["range_end"] = body.range_end
-        else:
-            out_base["announcement_resolution"] = body.announcement_resolution
-            if body.announcement_resolution == "manual":
-                ann = pd.to_datetime(body.announcement_date)
-            else:
-                req = PeadSingleRequest(
-                    symbol=sym,
-                    announcement_date=None,
-                    use_cache=body.use_cache,
-                )
-                ann = _resolve_single_date(req, analyzer)
-            ann_dt = ann.to_pydatetime()
-            stock_data = analyzer.data_manager.get_stock_data_for_event_window(sym, ann_dt)
-            out_base["announcement_date_used"] = str(ann.date())
-
-        if stock_data is None or stock_data.empty:
-            err = (
-                f"No OHLCV for {sym} in the requested window from NSE/Yahoo. "
-                "Widen the explicit range or verify the symbol / announcement date."
-            )
-            if body.price_window == "pead_event":
-                err += f" (PEAD window around {out_base.get('announcement_date_used', '?')})"
-            return {"success": False, "error": err, **out_base}
-
-        idx = stock_data.index
-        anchor = pd.Timestamp(idx[-1])
-        ta = analyzer.technical_analyzer.analyze(
-            stock_data,
-            anchor,
+        return execute_technical(
+            analyzer,
             symbol=sym,
-            include_chart_payload=body.include_chart,
+            price_window=body.price_window,
+            announcement_resolution=body.announcement_resolution,
+            announcement_date=body.announcement_date,
+            range_start=body.range_start,
+            range_end=body.range_end,
+            include_chart=body.include_chart,
+            include_ai_verdict=body.include_ai_verdict,
         )
-        return {
-            "success": True,
-            **out_base,
-            "ohlc_index_start": str(idx.min())[:10],
-            "ohlc_index_end": str(idx.max())[:10],
-            "technical_analysis": ta,
-        }
 
     out = await asyncio.to_thread(_run)
     if out.get("success") is False:
         raise HTTPException(status_code=422, detail=out.get("error", "Technical run failed"))
-    if body.include_ai_verdict:
-        verdict = await asyncio.to_thread(generate_technical_verdict, out)
-        out["research_verdict"] = verdict
     return _json_safe(out)
 
 
@@ -424,17 +343,12 @@ async def run_scoring_stack(body: DatedSymbolToolRequest) -> dict[str, Any]:
     """CARs + five PEAD component scores + composite — no technicals, news, or files."""
     analyzer = _analyzer(body.use_cache)
     sym = body.symbol.strip().upper()
-    req = PeadSingleRequest(
-        symbol=sym,
-        announcement_date=body.announcement_date,
-        use_cache=body.use_cache,
-    )
-    ann = _resolve_single_date(req, analyzer)
 
     def _run():
-        return analyzer.analyze_scoring_only(sym, ann.to_pydatetime())
+        return execute_scoring_only(analyzer, sym, body.announcement_date)
 
-    return _json_safe(await asyncio.to_thread(_run))
+    out = await asyncio.to_thread(_run)
+    return _json_safe(out)
 
 
 @router.post("/run/trade-readiness")
@@ -447,19 +361,7 @@ async def run_trade_readiness_isolated(body: ExecutionSnapshotRequest) -> dict[s
     sym = body.symbol.strip().upper()
 
     def _run() -> dict[str, Any]:
-        full = fetch_light_trade_context(
-            sym,
-            analyzer.data_manager,
-            lookback_calendar_days=int(body.lookback_days),
-        )
-        if not full.get("success"):
-            return full
-        return {
-            "success": True,
-            "symbol": sym,
-            "trade_context": full.get("trade_context"),
-            "note": full.get("note"),
-        }
+        return execute_trade_readiness_isolated(analyzer, sym, body.lookback_days)
 
     return _json_safe(await asyncio.to_thread(_run))
 
@@ -469,29 +371,9 @@ async def run_document_pdf(body: DocumentPdfRequest) -> dict[str, Any]:
     """Parse an announcement PDF already on disk (NSE downloader naming convention)."""
     analyzer = _analyzer(body.use_cache)
     sym = body.symbol.strip().upper()
-    ann = pd.to_datetime(body.announcement_date)
 
     def _run() -> dict[str, Any]:
-        p = analyzer.pdf_downloader.get_pdf_path(sym, ann.to_pydatetime())
-        if not p or not p.exists():
-            return {
-                "success": False,
-                "error": (
-                    f"No PDF found for {sym} on {body.announcement_date}. "
-                    "Expected filename like {SYMBOL}_{YYYYMMDD}.pdf under the PDF download directory."
-                ),
-                "symbol": sym,
-            }
-        parsed = analyzer.pdf_parser.parse_announcement(p)
-        text = parsed.get("text") or ""
-        return {
-            "success": True,
-            "path": str(p),
-            "text_chars": len(text),
-            "text_preview": text[:8000],
-            "metrics": parsed.get("metrics"),
-            "guidance": parsed.get("guidance"),
-            "sentiment": parsed.get("sentiment"),
-        }
+        return execute_document_pdf(analyzer, sym, body.announcement_date)
 
-    return _json_safe(await asyncio.to_thread(_run))
+    out = await asyncio.to_thread(_run)
+    return _json_safe(out)

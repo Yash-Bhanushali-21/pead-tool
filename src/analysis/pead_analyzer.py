@@ -23,7 +23,7 @@ from src.scoring.earnings_quality import EarningsQualityScorer
 from src.scoring.contextual import ContextualScorer
 from src.scoring.composite_score import CompositeScorer
 from src.utils.visualization import Visualizer
-from src.config.settings import config
+from src.config.config import config
 from src.fundamentals import FundamentalAnalyzer
 from src.technical import TechnicalAnalyzer
 from src.synthesis.research_brief import build_research_brief_payload

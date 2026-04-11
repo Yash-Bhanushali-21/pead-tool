@@ -1,6 +1,8 @@
 # Project memory (canonical context)
 
-**Purpose:** Single source of truth for **progress, decisions, and recent changes**. Cursor agents must **read this file first** before substantial work, and **update it** after material changes (see `.cursor/rules`).
+**Purpose:** **Change log** and **README snapshot** source; high-level snapshot lines below feed `README.md` via `scripts/sync_memory_readme.py`.
+
+**Structured durable context** (scope, architecture, stack, active focus) lives in **`memory-bank/*.md`**. Cursor agents must **read all Memory Bank files at task start** per `.cursor/rules/memory-bank.mdc`, then use this file for dated changes and README sync.
 
 **Not investment advice.** This file describes software and research workflows only.
 
@@ -8,6 +10,7 @@
 
 ## Current snapshot
 
+- **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
 - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
 - **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
 - **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.
@@ -29,6 +32,7 @@
 
 | Date (UTC) | Area | Summary |
 |------------|------|---------|
+| 2026-04-11 | Cursor / docs | Introduced **Memory Bank** (`memory-bank/*.md`), always-apply rule `.cursor/rules/memory-bank.mdc`; retired `00-project-memory.mdc` (merged into Memory Bank rule). |
 | 2026-04-11 | Trade context | Added `trade_context` (liquidity, vol regime, alignment, model fit) + blend pillar; agent tools `get_execution_context_snapshot`, `get_yahoo_calendar_snippet`; synthesis brief section — research-only disclaimers. |
 | 2026-04-11 | Data / NSE | NSE fetchers now pass `datetime.date` (not DD-MM-YY strings); `fetch_historical_index_data` uses positional `index` + `to_calendar_date` (`src/data/nse_fetcher.py`, `time_compat`, Yahoo fallback). |
 | 2026-04-11 | PEAD / API | Fixed tz-naive vs tz-aware crash on `/api/tools/run/single`: `src/utils/time_compat.py`, normalize announcement anchor in `analyze_announcement`. |

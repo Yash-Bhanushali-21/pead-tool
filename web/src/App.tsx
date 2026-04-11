@@ -24,8 +24,8 @@ function Layout() {
   const toolsActive = loc.pathname === "/tools" || loc.pathname.startsWith("/tools/");
 
   return (
-    <div className="min-h-screen bg-surface">
-      <header className="sticky top-0 z-10 border-b border-surface-border bg-surface/95 backdrop-blur">
+    <div className="flex min-h-screen flex-col bg-surface">
+      <header className="sticky top-0 z-10 shrink-0 border-b border-surface-border bg-surface/95 backdrop-blur">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3">
           <div className="flex items-baseline gap-3">
             <span className="text-lg font-semibold tracking-tight text-white">
@@ -62,7 +62,9 @@ function Layout() {
           </nav>
         </div>
       </header>
-      <Outlet />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <Outlet />
+      </div>
     </div>
   );
 }

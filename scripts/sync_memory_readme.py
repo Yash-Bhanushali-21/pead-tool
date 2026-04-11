@@ -41,8 +41,8 @@ def extract_snapshot(text: str) -> str:
         else:
             quoted.append(f"> {s}")
     intro = (
-        "> **Living context:** Full log in [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md). "
-        "Read it first; update it after substantive changes."
+        "> **Living context:** Read all **`memory-bank/*.md`** at task start (Cursor rule `memory-bank.mdc`). "
+        "Dated **change log** and README snapshot source: [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)."
     )
     inner = intro + "\n" + "\n".join(quoted)
     return f"{START}\n\n{inner}\n\n{END}"

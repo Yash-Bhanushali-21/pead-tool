@@ -7,7 +7,7 @@ import numpy as np
 from typing import Dict, Optional
 import logging
 
-from src.config.settings import config
+from src.config.config import config
 
 logger = logging.getLogger(__name__)
 

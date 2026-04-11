@@ -14,7 +14,7 @@ from pathlib import Path
 
 from src.data.nse_fetcher import NSEDataFetcher
 from src.data.yahoo_fetcher import YahooDataFetcher
-from src.config.settings import config
+from src.config.config import config
 
 logger = logging.getLogger(__name__)
 

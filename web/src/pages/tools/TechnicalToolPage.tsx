@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   TechnicalAnalysisChart,
   type TechnicalChartPayload,
@@ -10,6 +11,10 @@ import {
   isResearchVerdict,
   TechnicalVerdictPanel,
 } from "../../components/tools/TechnicalVerdictPanel";
+import {
+  buildTechnicalChatSeedPayload,
+  CHAT_SEED_STORAGE_KEY,
+} from "../../lib/technicalChatSeed";
 
 function technicalChartFromResult(data: unknown): TechnicalChartPayload | null {
   if (!data || typeof data !== "object") return null;
@@ -25,6 +30,7 @@ type PriceWindow = "pead_event" | "explicit_range";
 type AnnouncementResolution = "auto" | "manual";
 
 export default function TechnicalToolPage() {
+  const navigate = useNavigate();
   const [symbol, setSymbol] = useState("SMLMAH");
   const [useCache, setUseCache] = useState(true);
   const [priceWindow, setPriceWindow] = useState<PriceWindow>("pead_event");
@@ -260,6 +266,30 @@ export default function TechnicalToolPage() {
       {verdict && (
         <div className="mt-8">
           <TechnicalVerdictPanel verdict={verdict} />
+        </div>
+      )}
+      {result !== null && typeof result === "object" && (
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => {
+              const payload = buildTechnicalChatSeedPayload(result);
+              try {
+                sessionStorage.setItem(CHAT_SEED_STORAGE_KEY, JSON.stringify(payload));
+              } catch {
+                /* quota / private mode */
+              }
+              navigate("/", { state: { peadTechnicalChat: payload } });
+            }}
+            className="rounded-xl border border-sky-700/60 bg-sky-950/40 px-5 py-2.5 text-sm font-semibold text-sky-100 hover:bg-sky-900/50 disabled:opacity-40"
+          >
+            Continue in chat
+          </button>
+          <span className="text-xs text-slate-500">
+            Opens Chat with this run&apos;s compact JSON as the first message so you can ask the
+            agent follow-up questions.
+          </span>
         </div>
       )}
       <ResultPanel error={error} result={result} loading={loading} />

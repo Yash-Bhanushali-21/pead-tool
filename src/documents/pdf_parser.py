@@ -15,7 +15,7 @@ except ImportError:
     pdfplumber = None
 
 from textblob import TextBlob
-from src.config.settings import config
+from src.config.config import config
 
 logger = logging.getLogger(__name__)
 
