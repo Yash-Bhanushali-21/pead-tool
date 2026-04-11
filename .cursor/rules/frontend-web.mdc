@@ -1,0 +1,13 @@
+---
+description: React + TypeScript + Vite + Tailwind conventions for web/
+globs: web/**/*
+alwaysApply: false
+---
+
+# Frontend (`web/`)
+
+- **Stack:** React 18, TypeScript, Vite 5, Tailwind 3, React Router 6. Prefer **functional components** and hooks; avoid class components.
+- **API:** Use relative `/api/...` paths; Vite dev server proxies to FastAPI. Handle **streaming** (SSE) and JSON errors consistently; show loading and empty states.
+- **Styling:** Tailwind utility-first; keep layout accessible (focus states, contrast). Avoid large new CSS files unless necessary.
+- **Structure:** Pages under `web/src/pages/`, shared types in `web/src/types.ts`. Keep bundles lean—no heavy markdown libs unless required.
+- **Copy:** Research-only disclaimers where user-facing; no buy/sell imperative language in UI strings.

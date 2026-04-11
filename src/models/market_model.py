@@ -31,6 +31,8 @@ class MarketModel:
         self.stderr_alpha = None
         self.stderr_beta = None
         self.residuals = None
+        self.residual_std = None  # sqrt(MSE) from estimation window — for CAR tests
+        self.sigma_squared = None
         self.estimation_window = config.ESTIMATION_WINDOW
 
     def estimate(
@@ -102,6 +104,8 @@ class MarketModel:
             'stderr_alpha': self.stderr_alpha,
             'stderr_beta': self.stderr_beta,
             'n_observations': len(estimation_data),
+            'residual_std': self.residual_std,
+            'sigma_squared': self.sigma_squared,
             't_stat_alpha': self.alpha / self.stderr_alpha if self.stderr_alpha > 0 else 0,
             't_stat_beta': self.beta / self.stderr_beta if self.stderr_beta > 0 else 0,
         }
@@ -164,16 +168,19 @@ class MarketModel:
 
         # Standard errors
         if n > k:
-            # Variance of residuals
-            sigma_squared = ss_res / (n - k)
+            # Variance of residuals (estimation-window error variance for event tests)
+            self.sigma_squared = ss_res / (n - k)
+            self.residual_std = float(np.sqrt(self.sigma_squared))
 
             # Variance-covariance matrix
             X_with_const = np.column_stack([np.ones(n), X])
-            var_covar = sigma_squared * np.linalg.inv(X_with_const.T @ X_with_const)
+            var_covar = self.sigma_squared * np.linalg.inv(X_with_const.T @ X_with_const)
 
             self.stderr_alpha = np.sqrt(var_covar[0, 0])
             self.stderr_beta = np.sqrt(var_covar[1, 1])
         else:
+            self.sigma_squared = 0.0
+            self.residual_std = 0.0
             self.stderr_alpha = 0
             self.stderr_beta = 0
 

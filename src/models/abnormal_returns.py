@@ -231,8 +231,14 @@ class AbnormalReturns:
             1 - stats.binom.cdf(positive_count - 1, n, 0.5)
         )
 
-        # Wilcoxon signed-rank test
+        # Wilcoxon signed-rank test (median vs 0)
         try:
+            wilcoxon_stat, wilcoxon_p = stats.wilcoxon(
+                ar_series,
+                alternative="two-sided",
+                zero_method="wilcox",
+            )
+        except TypeError:
             wilcoxon_stat, wilcoxon_p = stats.wilcoxon(ar_series)
         except Exception:
             wilcoxon_stat, wilcoxon_p = None, None

@@ -1,0 +1,11 @@
+{
+  "name": "pead-tool",
+  "private": true,
+  "description": "Dev helper: run API + Vite together (optional; see scripts/dev.sh)",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,magenta \"python3 -m uvicorn server.app:app --reload --host 0.0.0.0 --port 8000\" \"npm run dev --prefix web\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -37,7 +37,9 @@ class CumulativeAbnormalReturns:
     def calculate(
         self,
         ar_data: pd.DataFrame,
-        windows: Optional[List[int]] = None
+        windows: Optional[List[int]] = None,
+        estimation_residual_std: Optional[float] = None,
+        estimation_t_df: Optional[int] = None,
     ) -> Dict[int, Dict]:
         """
         Calculate CAR for multiple windows
@@ -72,7 +74,8 @@ class CumulativeAbnormalReturns:
                     't_statistic': 0,
                     'p_value': 1.0,
                     'significant': False,
-                    'annualized_return': 0
+                    'annualized_return': 0,
+                    'car_test_uses_estimation_sigma': False,
                 }
             return self.cars
 
@@ -82,14 +85,21 @@ class CumulativeAbnormalReturns:
         logger.info(f"Calculating CAR for windows: {windows}")
 
         for window in windows:
-            self.cars[window] = self._calculate_window_car(ar_data, window)
+            self.cars[window] = self._calculate_window_car(
+                ar_data,
+                window,
+                estimation_residual_std=estimation_residual_std,
+                estimation_t_df=estimation_t_df,
+            )
 
         return self.cars
 
     def _calculate_window_car(
         self,
         ar_data: pd.DataFrame,
-        window: int
+        window: int,
+        estimation_residual_std: Optional[float] = None,
+        estimation_t_df: Optional[int] = None,
     ) -> Dict:
         """
         Calculate CAR for a specific window
@@ -114,47 +124,79 @@ class CumulativeAbnormalReturns:
             return {
                 'window': window,
                 'car': 0,
+                'car_pct': 0,
                 'actual_days': 0,
                 'mean_daily_ar': 0,
                 'std_daily_ar': 0,
                 't_statistic': 0,
                 'p_value': 1.0,
-                'significant': False
+                'significant': False,
+                'car_test_uses_estimation_sigma': False,
             }
 
         # Calculate CAR (sum of ARs)
         car_value = ar_window['AR'].sum()
         actual_days = len(ar_window)
         mean_daily_ar = ar_window['AR'].mean()
-        std_daily_ar = ar_window['AR'].std()
+        std_daily_ar = ar_window['AR'].std(ddof=1) if actual_days > 1 else 0.0
 
-        # Statistical significance
-        # H0: CAR = 0
-        # Under null, CAR ~ N(0, window * σ²_AR)
-        if std_daily_ar > 0 and actual_days > 1:
-            # Standard error of CAR
+        # Significance: prefer estimation-window residual σ (event-study standard).
+        # Under i.i.d. residual assumption: Var(CAR_{0,L}) ≈ L * σ²_ε (Patell 1976; MacKinlay 1997).
+        uses_est_sigma = (
+            estimation_residual_std is not None
+            and np.isfinite(estimation_residual_std)
+            and estimation_residual_std > 0
+        )
+        if uses_est_sigma:
+            sigma = float(estimation_residual_std)
+            se_car = sigma * np.sqrt(actual_days)
+            t_stat = car_value / se_car if se_car > 0 else 0.0
+            df = estimation_t_df if estimation_t_df is not None and estimation_t_df > 0 else max(actual_days - 1, 1)
+        elif (
+            np.isfinite(std_daily_ar)
+            and std_daily_ar > 0
+            and actual_days > 1
+        ):
+            # Fallback: in-window sample std (biased for single-name tests; flagged in output)
             se_car = std_daily_ar * np.sqrt(actual_days)
             t_stat = car_value / se_car
-            # Degrees of freedom
             df = actual_days - 1
-            p_value = 2 * (1 - stats.t.cdf(abs(t_stat), df))
-            significant = p_value < config.SIGNIFICANCE_LEVEL
         else:
-            t_stat = 0
+            t_stat = 0.0
+            df = 1
             p_value = 1.0
             significant = False
+            result = {
+                'window': window,
+                'car': car_value,
+                'car_pct': car_value * 100,
+                'actual_days': actual_days,
+                'mean_daily_ar': mean_daily_ar,
+                'std_daily_ar': std_daily_ar,
+                't_statistic': t_stat,
+                'p_value': p_value,
+                'significant': significant,
+                'annualized_return': self._annualize_car(car_value, actual_days),
+                'car_test_uses_estimation_sigma': uses_est_sigma,
+            }
+            return result
+
+        p_value = float(2 * (1 - stats.t.cdf(abs(t_stat), df)))
+        significant = p_value < config.SIGNIFICANCE_LEVEL
 
         result = {
             'window': window,
             'car': car_value,
-            'car_pct': car_value * 100,  # As percentage
+            # Human-readable percent number (e.g. 3.27 means 3.27%); use `car` for decimal (0.0327)
+            'car_pct': car_value * 100,
             'actual_days': actual_days,
             'mean_daily_ar': mean_daily_ar,
             'std_daily_ar': std_daily_ar,
             't_statistic': t_stat,
             'p_value': p_value,
             'significant': significant,
-            'annualized_return': self._annualize_car(car_value, actual_days)
+            'annualized_return': self._annualize_car(car_value, actual_days),
+            'car_test_uses_estimation_sigma': uses_est_sigma,
         }
 
         logger.info(

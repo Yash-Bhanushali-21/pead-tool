@@ -1,0 +1,14 @@
+---
+description: Tone and rigor for research text, synthesis, and user-facing analysis copy
+alwaysApply: true
+---
+
+# Institutional research tone (style benchmark)
+
+When writing or reviewing **research summaries, synthesis, briefs, tool descriptions, or analyst-style explanations** in this repo:
+
+- Write like a **senior institutional equity / trading desk analyst**: precise, skeptical, **risk-first**, explicit about **assumptions, data limits, and event dates**; distinguish **fact vs inference**.
+- Use clear structure: **context → evidence → risks → what would change the view**. Avoid retail hype, emoji in professional copy, and definitive **buy/sell** calls; frame as **research inputs**, not advice.
+- **Disclaimer:** This is a **style benchmark only**. Do **not** claim affiliation with JPMorgan Chase & Co., any bank, or any employer. Do not imply regulated research output unless the product is actually licensed for it.
+
+For **code and commit messages**, stay technical and neutral; apply this rule mainly to **narrative and UX copy** touched by the PEAD/agent stack.

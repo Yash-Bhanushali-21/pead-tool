@@ -26,7 +26,8 @@ class Config:
 
     # Data Parameters
     TOP_N_COMPANIES: int = 10  # Analyze top N recent announcements
-    MIN_TRADING_DAYS: int = 150  # Minimum days of data required
+    # Floor for aligned stock/index rows; thin or newly covered names may have <150 sessions
+    MIN_TRADING_DAYS: int = 80
 
     # PDF Download Settings
     PDF_DOWNLOAD_DIR: str = "./data/announcements"
@@ -48,6 +49,18 @@ class Config:
     # Sentiment Analysis
     SENTIMENT_KEYWORDS_POSITIVE: List[str] = None
     SENTIMENT_KEYWORDS_NEGATIVE: List[str] = None
+
+    # News scan (Yahoo + Google News RSS); optional LLM via OPENAI_API_KEY
+    NEWS_LOOKBACK_DAYS: int = 90
+    NEWS_MAX_ARTICLES: int = 80
+    OPENAI_NEWS_MODEL: str = "gpt-4o-mini"
+    # Optional desk-style commentary on technical tool output (same API key)
+    OPENAI_TECH_VERDICT_MODEL: str = "gpt-4o-mini"
+
+    # PydanticAI research agents (set OPENAI_API_KEY; model strings like openai:gpt-4o-mini)
+    AGENT_MODEL: str = "openai:gpt-4o-mini"
+    AGENT_SYNTHESIS_MODEL: str = "openai:gpt-4o-mini"
+    AGENT_OUTPUT_SUBDIR: str = "agent_runs"
 
     def __post_init__(self):
         """Initialize default values for mutable fields"""
@@ -78,6 +91,7 @@ class Config:
         # Create directories if they don't exist
         os.makedirs(self.PDF_DOWNLOAD_DIR, exist_ok=True)
         os.makedirs(self.CACHE_DIR, exist_ok=True)
+        os.makedirs(os.path.join("./output", self.AGENT_OUTPUT_SUBDIR), exist_ok=True)
 
 
 # Global configuration instance

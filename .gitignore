@@ -27,6 +27,11 @@ ENV/
 env/
 .venv
 
+# Frontend / root dev deps (concurrently)
+node_modules/
+web/node_modules/
+web/dist/
+
 # IDE
 .vscode/
 .idea/

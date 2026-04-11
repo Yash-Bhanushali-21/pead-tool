@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.analysis.pead_analyzer import PEADAnalyzer
 from src.config.settings import config
+from src.fundamentals import FundamentalAnalyzer
 
 
 def setup_logging(verbose: bool = False):
@@ -88,8 +89,13 @@ def _get_latest_announcement_date(symbol: str, data_manager):
         if hasattr(ticker, 'earnings_dates') and ticker.earnings_dates is not None:
             earnings_dates = ticker.earnings_dates
             if not earnings_dates.empty:
-                # Get most recent past earnings date
-                now = pd.Timestamp.now()
+                # Get most recent past earnings date (align tz for Yahoo index)
+                idx = earnings_dates.index
+                now = (
+                    pd.Timestamp.now(tz=idx.tz)
+                    if getattr(idx, "tz", None) is not None
+                    else pd.Timestamp.now()
+                )
                 past_earnings = earnings_dates[earnings_dates.index <= now]
                 if not past_earnings.empty:
                     latest = past_earnings.index[0]
@@ -137,10 +143,12 @@ def analyze_recent(args):
 
     analyzer = PEADAnalyzer(use_cache=not args.no_cache)
 
-    results = analyzer.analyze_recent_announcements(
+    results, batch_root = analyzer.analyze_recent_announcements(
         n=args.top,
         visualize=args.visualize,
-        output_dir=args.output
+        output_dir=args.output,
+        include_news=not getattr(args, "no_news", False),
+        news_lookback_days=getattr(args, "news_days", None),
     )
 
     if not results.empty:
@@ -161,7 +169,10 @@ def analyze_recent(args):
                   f"Rating: {row['Rating']:>15} | Confidence: {row['Confidence']:.0%}")
 
         print("\n" + "="*70)
-        print(f"Results saved to: {args.output}")
+        if batch_root is not None:
+            print(f"Results saved under batch folder:\n  {batch_root.resolve()}")
+        else:
+            print(f"Results saved to: {args.output}")
         print("="*70 + "\n")
 
     else:
@@ -200,7 +211,9 @@ def analyze_single(args):
         symbol=args.symbol,
         announcement_date=announcement_date,
         visualize=args.visualize,
-        output_dir=args.output
+        output_dir=args.output,
+        include_news=not getattr(args, "no_news", False),
+        news_lookback_days=getattr(args, "news_days", None),
     )
 
     if result['success']:
@@ -216,6 +229,14 @@ def analyze_single(args):
         report = scorer.get_detailed_report(composite)
         print(report)
 
+        fa = result.get("fundamental_analysis")
+        if fa:
+            print(FundamentalAnalyzer().format_report(fa))
+
+        brief = result.get("research_brief")
+        if brief:
+            print(brief)
+
         # Print CAR summary
         from src.models.car import CumulativeAbnormalReturns
         car_obj = CumulativeAbnormalReturns()
@@ -223,7 +244,8 @@ def analyze_single(args):
         print(car_obj.get_summary())
 
         print("\n" + "="*70)
-        print(f"Results saved to: {args.output}")
+        out = result.get("output_dir") or args.output
+        print(f"Results saved to:\n  {Path(out).resolve()}")
         print("="*70 + "\n")
 
     else:
@@ -260,6 +282,12 @@ def analyze_batch(args):
         print(f"Error reading file: {e}")
         return
 
+    batch_ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    csv_stem = Path(args.file).stem
+    batch_root = Path(args.output) / f"{batch_ts}_BATCH_{csv_stem}"
+    batch_root.mkdir(parents=True, exist_ok=True)
+    print(f"Batch run folder:\n  {batch_root.resolve()}\n")
+
     # Analyze each stock
     analyzer = PEADAnalyzer(use_cache=not args.no_cache)
     results = []
@@ -277,7 +305,10 @@ def analyze_batch(args):
                 symbol=symbol,
                 announcement_date=announcement_date,
                 visualize=args.visualize,
-                output_dir=args.output
+                output_dir=str(batch_root),
+                run_timestamp=batch_ts,
+                include_news=not getattr(args, "no_news", False),
+                news_lookback_days=getattr(args, "news_days", None),
             )
 
             if result['success']:
@@ -287,13 +318,15 @@ def analyze_batch(args):
 
                 # Extract component scores
                 components = composite.get('components', {})
+                fa = result.get("fundamental_analysis") or {}
+                fscores = fa.get("scores") or {}
 
                 # Extract CARs
-                car_1d = car_data.get(1, {}).get('car_pct', 0)
-                car_10d = car_data.get(10, {}).get('car_pct', 0)
-                car_30d = car_data.get(30, {}).get('car_pct', 0)
-                car_60d = car_data.get(60, {}).get('car_pct', 0)
-                car_90d = car_data.get(90, {}).get('car_pct', 0)
+                car_1d = car_data.get(1, {}).get('car', 0)
+                car_10d = car_data.get(10, {}).get('car', 0)
+                car_30d = car_data.get(30, {}).get('car', 0)
+                car_60d = car_data.get(60, {}).get('car', 0)
+                car_90d = car_data.get(90, {}).get('car', 0)
 
                 # Check for significance
                 car_30d_sig = car_data.get(30, {}).get('significant', False)
@@ -314,6 +347,10 @@ def analyze_batch(args):
                     'Drift_Confirmation': components.get('drift_confirmation', 0),
                     'Earnings_Quality': components.get('earnings_quality', 0),
                     'Contextual': components.get('contextual', 0),
+                    'Fundamental_Score': fscores.get('fundamental_score'),
+                    'Fundamental_Stance': fa.get('stance', ''),
+                    'News_Score': (result.get('news_sentiment') or {}).get('news_score_0_100'),
+                    'News_Articles': (result.get('news_sentiment') or {}).get('article_count'),
 
                     # CAR values
                     'CAR_1d': car_1d,
@@ -330,7 +367,8 @@ def analyze_batch(args):
                     # Market model
                     'Alpha': market_model.get('alpha', 0),
                     'Beta': market_model.get('beta', 0),
-                    'R_Squared': market_model.get('r_squared', 0)
+                    'R_Squared': market_model.get('r_squared', 0),
+                    'Run_Output_Dir': result.get('output_dir'),
                 })
             else:
                 print(f"   Failed: {result.get('error', 'Unknown error')}")
@@ -345,7 +383,7 @@ def analyze_batch(args):
         results_df = results_df.sort_values('Composite_Score', ascending=False)
 
         # Save comprehensive CSV
-        output_path = Path(args.output) / 'batch_analysis_summary.csv'
+        output_path = batch_root / 'batch_analysis_summary.csv'
         results_df.to_csv(output_path, index=False)
 
         print("\n" + "="*100)
@@ -432,12 +470,15 @@ def analyze_batch(args):
         print(f"{'='*100}\n")
 
         # Quick summary table
-        summary_cols = ['Symbol', 'Composite_Score', 'Rating', 'CAR_90d', 'Beta', 'R_Squared']
+        summary_cols = [
+            'Symbol', 'Composite_Score', 'Fundamental_Score', 'Rating', 'CAR_90d', 'Beta', 'R_Squared',
+        ]
+        summary_cols = [c for c in summary_cols if c in results_df.columns]
         print(results_df[summary_cols].to_string(index=False))
 
         print(f"\n{'='*100}")
-        print(f"Detailed report saved to: {output_path}")
-        print(f"Individual stock visualizations in: {args.output}/[SYMBOL]/")
+        print(f"Summary CSV: {output_path.resolve()}")
+        print(f"Per-stock outputs under: {batch_root.resolve()}/")
         print(f"{'='*100}\n")
     else:
         print("\nNo successful analyses.\n")
@@ -508,7 +549,10 @@ Examples:
         '--output',
         type=str,
         default='./output',
-        help='Output directory for results'
+        help=(
+            'Base output directory. Each run creates a dated subfolder '
+            '(timestamp, symbol, announcement date, aligned price range).'
+        ),
     )
 
     parser.add_argument(
@@ -529,6 +573,20 @@ Examples:
         '-v',
         action='store_true',
         help='Enable verbose logging'
+    )
+
+    parser.add_argument(
+        '--no-news',
+        action='store_true',
+        help='Skip Yahoo + Google News RSS scan and news sentiment step',
+    )
+
+    parser.add_argument(
+        '--news-days',
+        type=int,
+        default=None,
+        metavar='N',
+        help='News lookback window in days ending at now (default: 90 from config)',
     )
 
     args = parser.parse_args()

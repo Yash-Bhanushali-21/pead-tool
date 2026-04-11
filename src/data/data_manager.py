@@ -349,8 +349,8 @@ class DataManager:
         tuple
             (stock_data, market_data)
         """
-        # Calculate date range with buffer
-        start_date = announcement_date - timedelta(days=pre_window * 2)
+        # Wide calendar span so thin tickers still pull max available history from vendors
+        start_date = announcement_date - timedelta(days=max(400, pre_window * 3))
         end_date = announcement_date + timedelta(days=post_window * 2)
 
         logger.info(f"Preparing dataset for {symbol} around {announcement_date}")
@@ -363,13 +363,41 @@ class DataManager:
 
         # Align dates (keep only trading days present in both)
         if stock_data is not None and market_data is not None:
+            stock_data = self._strip_tz_index(stock_data)
+            market_data = self._strip_tz_index(market_data)
             common_dates = stock_data.index.intersection(market_data.index)
-            stock_data = stock_data.loc[common_dates].copy()
-            market_data = market_data.loc[common_dates].copy()
+            stock_data = stock_data.loc[common_dates].sort_index().copy()
+            market_data = market_data.loc[common_dates].sort_index().copy()
 
             logger.info(f"Prepared {len(stock_data)} aligned trading days")
 
         return stock_data, market_data
+
+    def get_stock_data_for_event_window(
+        self,
+        symbol: str,
+        announcement_date: datetime,
+        pre_window: int = 120,
+        post_window: int = 90,
+    ) -> Optional[pd.DataFrame]:
+        """
+        Same calendar span as :meth:`prepare_analysis_dataset`, but **stock OHLCV only**
+        (no index alignment). Use for technical snapshots when the market series is
+        unnecessary or unavailable.
+        """
+        start_date = announcement_date - timedelta(days=max(400, pre_window * 3))
+        end_date = announcement_date + timedelta(days=post_window * 2)
+        return self.get_stock_data(symbol, start_date, end_date)
+
+    @staticmethod
+    def _strip_tz_index(df: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+        """Normalize to timezone-naive dates so stock/index series align (Yahoo often returns UTC)."""
+        if df is None or df.empty:
+            return df
+        out = df.copy()
+        if getattr(out.index, "tz", None) is not None:
+            out.index = out.index.tz_convert(None)
+        return out
 
     def clear_cache(self, older_than_days: int = 7) -> None:
         """

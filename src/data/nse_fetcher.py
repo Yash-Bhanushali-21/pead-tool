@@ -9,6 +9,8 @@ from typing import Optional, List, Dict, Tuple
 import logging
 from nse import NSE
 
+from src.utils.time_compat import to_calendar_date
+
 logger = logging.getLogger(__name__)
 
 
@@ -150,12 +152,11 @@ class NSEDataFetcher:
         try:
             logger.info(f"Fetching stock data for {symbol} from {start_date} to {end_date}")
 
-            # NSE package provides historical data
-            # Correct method name: fetch_equity_historical_data
+            # NSE package expects datetime.date objects (see fetch_equity_historical_data docs).
             data = self.nse.fetch_equity_historical_data(
                 symbol=symbol,
-                from_date=start_date.strftime('%d-%m-%Y'),
-                to_date=end_date.strftime('%d-%m-%Y')
+                from_date=to_calendar_date(start_date),
+                to_date=to_calendar_date(end_date),
             )
 
             if data is None or len(data) == 0:
@@ -190,8 +191,15 @@ class NSEDataFetcher:
             # Sort by date
             df.sort_index(inplace=True)
 
+            if "Close" not in df.columns:
+                logger.warning(
+                    f"NSE response for {symbol} had no closing price column after mapping; "
+                    "falling back to Yahoo if enabled"
+                )
+                return None
+
             # Calculate returns
-            df['Return'] = df['Close'].pct_change()
+            df["Return"] = df["Close"].pct_change()
 
             logger.info(f"Fetched {len(df)} rows for {symbol}")
             return df
@@ -256,12 +264,11 @@ class NSEDataFetcher:
         try:
             logger.info(f"Fetching index data for {index}")
 
-            # For indices, use fetch_historical_index_data
-            # NSE package has separate method for index data
+            # First positional / keyword is ``index`` (not ``symbol``); dates must be ``date``.
             data = self.nse.fetch_historical_index_data(
-                symbol=index,
-                from_date=start_date.strftime('%d-%m-%Y'),
-                to_date=end_date.strftime('%d-%m-%Y')
+                index,
+                from_date=to_calendar_date(start_date),
+                to_date=to_calendar_date(end_date),
             )
 
             if data:

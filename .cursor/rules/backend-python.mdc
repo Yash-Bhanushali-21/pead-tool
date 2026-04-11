@@ -1,0 +1,13 @@
+---
+description: FastAPI server, agents, and src Python conventions
+globs: server/**/*.py
+alwaysApply: false
+---
+
+# Backend (Python)
+
+- **API:** FastAPI in `server/`; use Pydantic models for request bodies; **CORS** via env `PEAD_CORS_ORIGINS`. Prefer **async** handlers; offload blocking PEAD work with **`asyncio.to_thread`** (or equivalent), not the event loop.
+- **Imports:** Project root on `sys.path` when running `uvicorn server.app:app` from repo root; keep imports stable for that layout.
+- **PEAD core:** `src/analysis/pead_analyzer.py` and `src/` modules—preserve statistical meaning of CAR, market model, and scoring; document assumptions when changing formulas.
+- **Agents:** PydanticAI in `src/agent/`; tools must not fabricate prices or metrics—only return what the pipeline produces.
+- **Secrets:** Never commit API keys; read from environment (`OPENAI_API_KEY`, etc.).

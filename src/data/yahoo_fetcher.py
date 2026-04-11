@@ -5,9 +5,11 @@ Fallback/supplementary data source when NSE data is unavailable
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple, Any
 import logging
 import yfinance as yf
+
+from src.utils.time_compat import to_calendar_date
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +65,11 @@ class YahooDataFetcher:
             logger.info(f"Fetching Yahoo data for {yahoo_symbol}")
 
             ticker = yf.Ticker(yahoo_symbol)
-            df = ticker.history(start=start_date, end=end_date)
+            # yfinance accepts datetime.date; avoid passing datetimes that confuse strict builds.
+            start_d = to_calendar_date(start_date)
+            end_d = to_calendar_date(end_date)
+            end_exclusive = end_d + timedelta(days=1)
+            df = ticker.history(start=start_d, end=end_exclusive)
 
             if df.empty:
                 logger.warning(f"No Yahoo data for {yahoo_symbol}")
@@ -109,7 +115,10 @@ class YahooDataFetcher:
             logger.info(f"Fetching Yahoo index data for {index_symbol}")
 
             ticker = yf.Ticker(index_symbol)
-            df = ticker.history(start=start_date, end=end_date)
+            start_d = to_calendar_date(start_date)
+            end_d = to_calendar_date(end_date)
+            end_exclusive = end_d + timedelta(days=1)
+            df = ticker.history(start=start_d, end=end_exclusive)
 
             if df.empty:
                 logger.warning(f"No Yahoo data for index {index_symbol}")
@@ -195,6 +204,72 @@ class YahooDataFetcher:
         except Exception as e:
             logger.error(f"Error fetching financials for {symbol}: {e}")
             return {}
+
+    def get_yoy_quarter_metrics(self, symbol: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Latest quarter vs year-ago quarter (same fiscal seasonality) from Yahoo statements.
+
+        Used when announcement PDFs are missing so earnings-surprise scoring is not stuck at zero.
+        Maps net-income growth into the same `eps` slot used by EarningsSurpriseScorer (earnings growth).
+        """
+        empty: Tuple[Dict[str, Any], Dict[str, Any]] = ({}, {})
+        try:
+            yahoo_symbol = self.nse_to_yahoo_symbol(symbol)
+            ticker = yf.Ticker(yahoo_symbol)
+            inc = getattr(ticker, "quarterly_income_stmt", None)
+            if inc is None or not isinstance(inc, pd.DataFrame) or inc.empty or inc.shape[1] < 5:
+                inc = ticker.quarterly_financials
+            if inc is None or not isinstance(inc, pd.DataFrame) or inc.empty or inc.shape[1] < 5:
+                return empty
+
+            dates = sorted(inc.columns, reverse=True)
+            d0, d4 = dates[0], dates[4]
+
+            def _pick_row(names: Tuple[str, ...]) -> Optional[str]:
+                for n in names:
+                    if n in inc.index:
+                        return n
+                return None
+
+            rev_row = _pick_row(("Total Revenue", "Total Revenues", "Operating Revenue"))
+            ni_row = _pick_row(("Net Income", "Net Income Common Stockholders"))
+            op_row = _pick_row(("Operating Income", "Operating Income Loss"))
+
+            current: Dict[str, Any] = {}
+            yoy: Dict[str, Any] = {}
+
+            if rev_row:
+                r0, r4 = inc.loc[rev_row, d0], inc.loc[rev_row, d4]
+                if pd.notna(r0) and pd.notna(r4):
+                    current["revenue"] = float(r0)
+                    yoy["revenue"] = float(r4)
+
+            if ni_row:
+                n0, n4 = inc.loc[ni_row, d0], inc.loc[ni_row, d4]
+                if pd.notna(n0) and pd.notna(n4):
+                    # Scorer interprets as EPS-style growth; we use net income YoY as scale-free earnings proxy
+                    current["eps"] = float(n0)
+                    yoy["eps"] = float(n4)
+
+            if op_row and rev_row:
+                r0 = inc.loc[rev_row, d0]
+                o0 = inc.loc[op_row, d0]
+                r4 = inc.loc[rev_row, d4]
+                o4 = inc.loc[op_row, d4]
+                if pd.notna(r0) and pd.notna(o0) and float(r0) != 0:
+                    current["operating_margin"] = float(o0) / float(r0) * 100.0
+                if pd.notna(r4) and pd.notna(o4) and float(r4) != 0:
+                    yoy["operating_margin"] = float(o4) / float(r4) * 100.0
+
+            if not current or not yoy:
+                return empty
+
+            logger.info(f"YoY quarter metrics from Yahoo for {yahoo_symbol} (vs year-ago quarter)")
+            return current, yoy
+
+        except Exception as e:
+            logger.warning(f"YoY quarter metrics unavailable for {symbol}: {e}")
+            return empty
 
     def get_earnings_dates(self, symbol: str) -> pd.DataFrame:
         """

@@ -1,5 +1,17 @@
 # PEAD Tool - Post-Earnings Announcement Drift Analysis
 
+<!-- MEMORY_SNAPSHOT_START -->
+
+> **Living context:** Full log in [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md). Read it first; update it after substantive changes.
+> - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
+> - **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
+> - **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.
+> - **Memory sync:** After editing this section, run `python3 scripts/sync_memory_readme.py` or manually update the README block between `MEMORY_SNAPSHOT` markers.
+> - **Time:** Event anchors use `src/utils/time_compat.py` (naive UTC) so API/feed timestamps never trip pandas tz-naive vs tz-aware comparisons.
+> - **Trade readiness:** `src/trade_context/` adds execution-context scoring (not a trade recommendation); folded into synthesis blend when present.
+
+<!-- MEMORY_SNAPSHOT_END -->
+
 A comprehensive quantitative analysis tool for identifying and scoring Post-Earnings Announcement Drift (PEAD) opportunities in Indian equity markets.
 
 ## Overview
@@ -69,6 +81,47 @@ cd pead-tool
 # Install dependencies
 pip install -r requirements.txt
 ```
+
+### Research AI agent (PydanticAI) + chat UI
+
+The repo includes a **multi-agent** layer built with [PydanticAI](https://ai.pydantic.dev):
+
+- **Coordinator agent**: streams replies, calls tools to resolve earnings dates and run the full PEAD pipeline (`PEADAnalyzer`).
+- **Synthesis desk agent**: second model invoked via tool when narrative polish is needed.
+
+**Requirements:** set `OPENAI_API_KEY` (used by PydanticAI model strings such as `openai:gpt-4o-mini`). Optional: `PEAD_CORS_ORIGINS` for extra dev origins (comma-separated).
+
+**Boot API + UI together** (from repo root; Ctrl+C stops both):
+
+```bash
+pip install -r requirements.txt
+cd web && npm install && cd ..
+# optional: activate your venv so ./scripts/dev.sh picks it up
+./scripts/dev.sh
+# same thing: make dev
+```
+
+Alternative using **concurrently** (installs a small root `node_modules` once):
+
+```bash
+pip install -r requirements.txt && cd web && npm install && cd .. && npm install && npm run dev
+```
+
+**Manual split** (two terminals):
+
+```bash
+# Terminal 1 — backend
+export OPENAI_API_KEY=sk-...
+uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
+
+# Terminal 2 — frontend
+cd web && npm run dev
+```
+
+Open `http://localhost:5173` — the dev server proxies `/api/*` to the FastAPI app.
+
+- **Chat** (`/`) — streaming agent (`POST /api/chat/stream`, SSE). Non-streaming: `POST /api/chat`.
+- **Tools** (`/tools`) — form-driven PEAD runs (same filters as the CLI): `GET /api/tools/config`, `POST /api/tools/run/single`, `POST /api/tools/run/recent`. No OpenAI key required for these endpoints (only data vendors / optional news LLM if enabled).
 
 ## Dependencies
 

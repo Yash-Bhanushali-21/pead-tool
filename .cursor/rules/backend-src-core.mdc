@@ -1,0 +1,12 @@
+---
+description: Core PEAD and library code under src/ (excluding web)
+globs: src/**/*.py
+alwaysApply: false
+---
+
+# Core library (`src/`)
+
+- **Quant:** Changes to market model, CAR, or scoring affect research output—add or update tests under `tests/` when logic changes; note behavior in `PROJECT_MEMORY.md`.
+- **Data:** Respect NSE/Yahoo constraints; handle missing data and thin histories without silent wrong numbers.
+- **News:** Collector and sentiment pipeline must remain **optional** where configured; do not require OpenAI for core PEAD unless explicitly intended.
+- **Config:** Prefer `src/config/settings.py` over scattered constants; keep CLI and API aligned with the same knobs when possible.

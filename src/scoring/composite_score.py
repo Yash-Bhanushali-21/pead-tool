@@ -4,7 +4,7 @@ Combines all scoring components into final score
 """
 import pandas as pd
 import numpy as np
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 import logging
 
 from src.scoring.earnings_surprise import EarningsSurpriseScorer
@@ -61,7 +61,8 @@ class CompositeScorer:
         price_reaction_data: Dict,
         drift_confirmation_data: Dict,
         earnings_quality_data: Dict,
-        contextual_data: Dict
+        contextual_data: Dict,
+        data_quality: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, float]:
         """
         Calculate composite PEAD score
@@ -78,6 +79,8 @@ class CompositeScorer:
             Earnings quality score components
         contextual_data : dict
             Contextual score components
+        data_quality : dict, optional
+            Diagnostics (model fit, PDF/Yahoo coverage) used to scale confidence — not alpha.
 
         Returns
         -------
@@ -103,7 +106,7 @@ class CompositeScorer:
         )
 
         # Calculate confidence level based on data availability
-        confidence = self._calculate_confidence(components)
+        confidence = self._calculate_confidence(components, data_quality)
 
         result = {
             'composite_score': composite_score,
@@ -112,7 +115,8 @@ class CompositeScorer:
             'weights': self.weights,
             'confidence': confidence,
             'rating': self._get_rating(composite_score),
-            'recommendation': self._get_recommendation(composite_score, confidence)
+            'recommendation': self._get_recommendation(composite_score, confidence),
+            'data_quality': data_quality or {},
         }
 
         logger.info(
@@ -155,34 +159,55 @@ class CompositeScorer:
 
         return normalized
 
-    def _calculate_confidence(self, components: Dict[str, float]) -> float:
+    def _calculate_confidence(
+        self,
+        components: Dict[str, float],
+        data_quality: Optional[Dict[str, Any]] = None,
+    ) -> float:
         """
-        Calculate confidence level based on data availability
+        Confidence in the composite score (coverage and model fit), not expected alpha.
 
         Parameters
         ----------
         components : dict
             Component scores
+        data_quality : dict, optional
+            Flags such as has_pdf_text, has_yahoo_yoy, r_squared, residual_std
 
         Returns
         -------
         float
             Confidence level (0-1)
         """
-        # Count how many components have non-zero scores
+        dq = data_quality or {}
+
         available_components = sum(1 for score in components.values() if score != 0)
         total_components = len(components)
-
         base_confidence = available_components / total_components
 
-        # Boost confidence if drift_confirmation has strong signal
-        drift_score = components.get('drift_confirmation', 0)
-        if drift_score > 15:  # Strong drift
+        drift_score = components.get("drift_confirmation", 0)
+        if drift_score > 15:
             base_confidence *= 1.1
-        elif drift_score < 5:  # Weak drift
+        elif drift_score < 5:
             base_confidence *= 0.9
 
-        return min(base_confidence, 1.0)
+        r2 = dq.get("r_squared")
+        if r2 is not None and np.isfinite(r2):
+            if r2 < 0.05:
+                base_confidence *= 0.82
+            elif r2 < 0.15:
+                base_confidence *= 0.92
+
+        rs = dq.get("residual_std")
+        if rs is None or (isinstance(rs, (int, float)) and (not np.isfinite(rs) or rs <= 0)):
+            base_confidence *= 0.85
+
+        if not dq.get("has_pdf_text") and not dq.get("has_yahoo_yoy"):
+            base_confidence *= 0.78
+        elif not dq.get("has_yahoo_yoy") and components.get("earnings_surprise", 0) == 0:
+            base_confidence *= 0.88
+
+        return float(min(max(base_confidence, 0.05), 1.0))
 
     def _get_rating(self, composite_score: float) -> str:
         """
@@ -310,6 +335,16 @@ class CompositeScorer:
             report += f"  Contribution:      {contribution:>8.2f}\n\n"
 
         report += "-"*70 + "\n\n"
+
+        dq = score_data.get("data_quality") or {}
+        if dq:
+            report += "DATA COVERAGE (affects confidence, not alpha):\n"
+            report += f"  PDF text parsed:        {'yes' if dq.get('has_pdf_text') else 'no'}\n"
+            report += f"  Yahoo YoY fundamentals: {'yes' if dq.get('has_yahoo_yoy') else 'no'}\n"
+            r2 = dq.get("r_squared")
+            if r2 is not None and np.isfinite(r2):
+                report += f"  Market model R²:       {r2:.4f}\n"
+            report += "\n"
 
         # Recommendation
         report += "RECOMMENDATION:\n"
