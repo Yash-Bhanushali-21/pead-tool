@@ -146,20 +146,34 @@ def build_coordinator_agent(
         symbol: str,
         lookback_days: int = 90,
         max_articles: int = 80,
+        scrape_bodies: bool = True,
+        max_scrape: int = 25,
+        end_date_iso: Optional[str] = None,
     ) -> str:
         """
-        Headline collection (Yahoo + Google News RSS) + TextBlob / optional OpenAI sentiment blend.
-        Returns JSON: article_count, articles_preview, news_sentiment — **no PEAD, CARs, or fundamentals**.
-        Use when the user asks for news scan, sentiment, or headlines on an NSE symbol.
+        Yahoo + Google News RSS, optional **full article scrape** (first ``max_scrape`` URLs via trafilatura),
+        TextBlob + optional OpenAI blend, **bullish/bearish/neutral** aggregate label in ``news_sentiment``.
+
+        Returns JSON: window, article_count, articles_preview (with body_preview when scraped), scrape stats,
+        news_sentiment (includes stock_media_stance, per_article, stance_summary) — **no PEAD/CARs/fundamentals**.
         """
         sym = symbol.strip().upper()
 
         def _run():
+            end_dt = None
+            if end_date_iso:
+                try:
+                    end_dt = pd.Timestamp(end_date_iso).to_pydatetime()
+                except Exception:
+                    end_dt = None
             return run_news_sentiment_layer(
                 ctx.deps.analyzer,
                 sym,
                 lookback_days=int(lookback_days),
                 max_articles=int(max_articles),
+                end_date=end_dt,
+                scrape_bodies=bool(scrape_bodies),
+                max_scrape=int(max_scrape),
             )
 
         loop = asyncio.get_running_loop()

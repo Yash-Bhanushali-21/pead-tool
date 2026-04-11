@@ -29,6 +29,24 @@ def _textblob_scores(text: str) -> Dict[str, float]:
         return {"polarity": 0.0, "subjectivity": 0.0}
 
 
+def polarity_to_stance(polarity: float) -> str:
+    """Map TextBlob polarity [-1, 1] to a discrete label."""
+    if polarity >= 0.12:
+        return "bullish"
+    if polarity <= -0.12:
+        return "bearish"
+    return "neutral"
+
+
+def score_to_stance(score_0_100: float) -> str:
+    """Map aggregate 0–100 score to media stance (research label, not trading advice)."""
+    if score_0_100 >= 58.0:
+        return "bullish"
+    if score_0_100 <= 42.0:
+        return "bearish"
+    return "neutral"
+
+
 def analyze_articles_lexicon(articles: List[NewsArticle]) -> Dict[str, Any]:
     """Aggregate polarity → 0–100 score (50 = neutral)."""
     if not articles:
@@ -37,6 +55,7 @@ def analyze_articles_lexicon(articles: List[NewsArticle]) -> Dict[str, Any]:
             "mean_polarity": 0.0,
             "mean_subjectivity": 0.0,
             "article_count": 0,
+            "lexicon_stance": "neutral",
             "method": "textblob",
         }
 
@@ -57,6 +76,7 @@ def analyze_articles_lexicon(articles: List[NewsArticle]) -> Dict[str, Any]:
         "mean_polarity": mp,
         "mean_subjectivity": ms,
         "article_count": len(articles),
+        "lexicon_stance": score_to_stance(score),
         "method": "textblob",
     }
 
@@ -68,7 +88,7 @@ def _llm_synthesis(
     max_items: int = 35,
 ) -> Optional[Dict[str, Any]]:
     api_key = CONFIG.get("OPENAI_API_KEY")
-    if not api_key:
+    if not api_key or not articles:
         return None
 
     lines = []
@@ -140,6 +160,33 @@ def _map_llm_to_score(llm: Dict[str, Any]) -> float:
     return base * conf + 50.0 * (1.0 - conf)
 
 
+def per_article_lexicon(articles: List[NewsArticle], limit: int = 40) -> List[Dict[str, Any]]:
+    """Per-article polarity + stance for transparency (research only)."""
+    rows: List[Dict[str, Any]] = []
+    for a in articles[:limit]:
+        sc = _textblob_scores(a.text_for_sentiment())
+        pol = sc["polarity"]
+        rows.append(
+            {
+                "title": a.title[:200],
+                "url": a.url,
+                "source": a.source,
+                "published": a.published.strftime("%Y-%m-%d") if a.published else None,
+                "polarity": round(pol, 4),
+                "stance": polarity_to_stance(pol),
+                "has_body": bool((a.body_text or "").strip()),
+                "scrape_ok": a.scrape_error is None and bool((a.body_text or "").strip()),
+                "scrape_error": a.scrape_error,
+                "metadata": {
+                    k: v
+                    for k, v in (a.scrape_metadata or {}).items()
+                    if k in ("hostname", "sitename", "author", "date", "word_count")
+                },
+            }
+        )
+    return rows
+
+
 def run_news_sentiment_pipeline(
     symbol: str,
     company_name: str,
@@ -163,8 +210,29 @@ def run_news_sentiment_pipeline(
         combined = 0.45 * lex["news_score_0_100"] + 0.55 * llm_score
         out["news_score_0_100"] = float(max(0.0, min(100.0, combined)))
         out["method"] = "textblob+openai"
+        overall = (llm.get("overall") or "neutral").lower()
+        if "bull" in overall:
+            out["llm_stance"] = "bullish"
+        elif "bear" in overall:
+            out["llm_stance"] = "bearish"
+        else:
+            out["llm_stance"] = "neutral"
     else:
         out["news_score_0_100"] = lex["news_score_0_100"]
         out["method"] = "textblob"
+        out["llm_stance"] = None
+
+    out["stock_media_stance"] = score_to_stance(float(out["news_score_0_100"]))
+    out["stance_summary"] = (
+        f"Aggregate media tone: {out['stock_media_stance']} "
+        f"(score {out['news_score_0_100']:.1f}/100; lexicon {lex.get('lexicon_stance', 'neutral')}"
+        + (f", LLM {out.get('llm_stance')}" if out.get("llm_stance") else "")
+        + "). Research context only — not a buy/sell recommendation."
+    )
+    out["per_article"] = per_article_lexicon(articles)
+    out["disclaimer"] = (
+        "Media sentiment is noisy and incomplete; many articles are headlines only or blocked from scraping. "
+        "Not investment advice."
+    )
 
     return out

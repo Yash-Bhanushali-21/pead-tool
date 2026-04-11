@@ -5,6 +5,7 @@
 ## Current focus
 
 - **Memory Bank** is the structured brain: `memory-bank/*.md` + `.cursor/rules/memory-bank.mdc` (always apply).
+- **News research:** Optional **full-article scrape** (`trafilatura`) in a configurable date window; per-URL metadata; aggregate **bullish / bearish / neutral** media stance + `per_article` breakdown (research-only).
 - **Chat UI:** Session history sidebar (drawer mobile, collapsible rail desktop), stick-to-bottom scroll, **plain text while streaming** → **Markdown** after (`MarkdownContent`: react-markdown, remark-gfm, typography). App layout uses flex + `min-h-0` so the thread scrolls inside the viewport.
 - **README / changelog:** `PROJECT_MEMORY.md` **Current snapshot** + **Change log**; sync to README via `scripts/sync_memory_readme.py`.
 
@@ -22,6 +23,7 @@
 
 ## Next steps (when relevant)
 
+- **Fix news research tool:** user reported it does not work as expected (citations DB / UI / scrape path). See `progress.md` → Known gaps for file list and checks.
 - After milestones: bump `progress.md`, append `PROJECT_MEMORY.md` change log, run `sync_memory_readme.py` if snapshot changes.
 - Optional: code-split heavy chat client deps if bundle size hurts.
 

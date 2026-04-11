@@ -27,6 +27,8 @@ from src.agent.streaming import chat_messages_to_history, stream_research_chat
 from src.analysis.pead_analyzer import PEADAnalyzer
 from src.config.config import CONFIG, config
 from src.persistence.sqlite_chat import ChatStore, accumulate_stream_line
+from src.persistence.sqlite_news_articles import get_news_article_store
+from server.news_routes import router as news_router
 from server.tools_routes import router as tools_router
 
 
@@ -55,11 +57,14 @@ async def lifespan(app: FastAPI):
     store = ChatStore(CONFIG["CHAT_SQLITE_PATH"])
     store.init_schema()
     app.state.chat_store = store
+    news_path = CONFIG.get("NEWS_SQLITE_PATH") or CONFIG["CHAT_SQLITE_PATH"]
+    get_news_article_store(news_path)
     yield
 
 
 app = FastAPI(title="PEAD Research Agent", version="0.1.0", lifespan=lifespan)
 app.include_router(tools_router)
+app.include_router(news_router)
 
 _cors = CONFIG["PEAD_CORS_ORIGINS"]
 app.add_middleware(
@@ -78,6 +83,7 @@ def health():
         "agent_model": config.AGENT_MODEL,
         "chat_persist_enabled": CONFIG.get("CHAT_PERSIST_ENABLED", True),
         "chat_sqlite_path": CONFIG.get("CHAT_SQLITE_PATH"),
+        "news_sqlite_path": CONFIG.get("NEWS_SQLITE_PATH") or CONFIG.get("CHAT_SQLITE_PATH"),
     }
 
 

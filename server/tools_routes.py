@@ -55,6 +55,7 @@ def tools_config() -> dict[str, Any]:
         "news": {
             "lookback_days_default": config.NEWS_LOOKBACK_DAYS,
             "max_articles_default": config.NEWS_MAX_ARTICLES,
+            "max_scrape_default": 25,
             "openai_news_model": config.OPENAI_NEWS_MODEL,
         },
         "technical": {
@@ -259,6 +260,20 @@ class NewsToolRequest(BaseModel):
     lookback_days: int = Field(90, ge=1, le=730)
     max_articles: int = Field(80, ge=1, le=500)
     use_cache: bool = True
+    end_date: Optional[str] = Field(
+        None,
+        description="ISO date YYYY-MM-DD; end of news window (default: now UTC)",
+    )
+    scrape_bodies: bool = Field(
+        True,
+        description="Fetch full article HTML for first N URLs (trafilatura)",
+    )
+    max_scrape: int = Field(
+        25,
+        ge=0,
+        le=80,
+        description="Max articles to scrape for body text (0 = headlines/snippets only)",
+    )
 
 
 class DocumentPdfRequest(BaseModel):
@@ -323,9 +338,20 @@ async def run_technical(body: TechnicalToolRequest) -> dict[str, Any]:
 
 @router.post("/run/news")
 async def run_news_layer(body: NewsToolRequest) -> dict[str, Any]:
-    """Headline collection + TextBlob / optional OpenAI sentiment — no PEAD."""
+    """Headlines + optional full-page scrape + TextBlob / optional OpenAI sentiment — no PEAD."""
     analyzer = _analyzer(body.use_cache)
     sym = body.symbol.strip().upper()
+
+    end_dt: Optional[datetime] = None
+    if body.end_date:
+        raw = body.end_date.strip()
+        try:
+            end_dt = datetime.fromisoformat(raw)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail="end_date must be YYYY-MM-DD or full ISO datetime",
+            ) from None
 
     def _run() -> dict[str, Any]:
         return run_news_sentiment_layer(
@@ -333,6 +359,9 @@ async def run_news_layer(body: NewsToolRequest) -> dict[str, Any]:
             sym,
             lookback_days=int(body.lookback_days),
             max_articles=int(body.max_articles),
+            end_date=end_dt,
+            scrape_bodies=bool(body.scrape_bodies),
+            max_scrape=int(body.max_scrape),
         )
 
     return _json_safe(await asyncio.to_thread(_run))

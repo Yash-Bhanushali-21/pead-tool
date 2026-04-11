@@ -10,6 +10,7 @@
 
 ## Known gaps / backlog
 
+- **News + citations tool — needs fix (user report: not working as expected).** Next pass: reproduce (`/tools` → News + sentiment, `/api/tools/run/news`, `GET /api/news/articles`), verify SQLite `news_article_citations` writes + UTC `fetched_date` vs UI filter, proxy/CORS, `persisted_citations` in response, trafilatura failures. Touch: `src/news/layer.py`, `src/persistence/sqlite_news_articles.py`, `server/news_routes.py`, `web/src/pages/tools/NewsToolPage.tsx`.
 - Open items: see `activeContext.md` and `PROJECT_MEMORY.md` → Open questions.
 - Large JS bundle on chat route (markdown stack); optional code-splitting later.
 

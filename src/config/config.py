@@ -156,6 +156,8 @@ CONFIG: Dict[str, Any] = {
     "AGENT_OUTPUT_SUBDIR": _get("AGENT_OUTPUT_SUBDIR", "agent_runs"),
     # Chat persistence (SQLite)
     "CHAT_SQLITE_PATH": _get("CHAT_SQLITE_PATH", "./data/pead_chat.sqlite3"),
+    # News citations (defaults to same file as chat if unset)
+    "NEWS_SQLITE_PATH": _get("NEWS_SQLITE_PATH", "") or None,
     "CHAT_PERSIST_ENABLED": _bool("CHAT_PERSIST_ENABLED", True),
     "SCORING_WEIGHTS": _build_scoring_weights(),
     "SENTIMENT_KEYWORDS_POSITIVE": _positive_keywords(),

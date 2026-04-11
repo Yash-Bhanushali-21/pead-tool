@@ -11,6 +11,7 @@
 ## Current snapshot
 
 - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
+- **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance in API/UI (`/api/tools/run/news`).
 - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
 - **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
 - **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.
@@ -32,6 +33,8 @@
 
 | Date (UTC) | Area | Summary |
 |------------|------|---------|
+| 2026-04-12 | News / UX | User report: news + **citations tool not working as expected** — logged in `memory-bank/progress.md` for follow-up (repro, SQLite, UTC filter, API). |
+| 2026-04-12 | News | Article **web scraping** (trafilatura) for first N URLs; **metadata** (hostname, author, date, word count); **bullish/bearish/neutral** aggregate (`stock_media_stance`, `per_article`); Google RSS query fixed (removed stray symbol); News tool API/UI: `end_date`, `scrape_bodies`, `max_scrape`. |
 | 2026-04-11 | Cursor / docs | Introduced **Memory Bank** (`memory-bank/*.md`), always-apply rule `.cursor/rules/memory-bank.mdc`; retired `00-project-memory.mdc` (merged into Memory Bank rule). |
 | 2026-04-11 | Trade context | Added `trade_context` (liquidity, vol regime, alignment, model fit) + blend pillar; agent tools `get_execution_context_snapshot`, `get_yahoo_calendar_snippet`; synthesis brief section — research-only disclaimers. |
 | 2026-04-11 | Data / NSE | NSE fetchers now pass `datetime.date` (not DD-MM-YY strings); `fetch_historical_index_data` uses positional `index` + `to_calendar_date` (`src/data/nse_fetcher.py`, `time_compat`, Yahoo fallback). |
@@ -43,7 +46,7 @@
 
 ## Open questions / backlog
 
-- (Add items as they arise.)
+- **News + citations:** Tool reported **not working as expected** — debug next session (API persist, `GET /api/news/articles`, UTC date filter vs UI, SQLite path). Details in `memory-bank/progress.md`.
 
 ---
 

@@ -3,7 +3,8 @@ Collect news headlines/snippets for an Indian equity symbol from:
 - Yahoo Finance ticker.news
 - Google News RSS (public feeds; filter by date client-side)
 
-Full article body is not scraped (paywalls, ToS); sentiment uses title + snippet.
+Optional full-article text via ``article_scraper.enrich_articles_with_scrapes`` (trafilatura).
+Default sentiment still works on title + snippet when bodies are not fetched.
 """
 from __future__ import annotations
 
@@ -41,8 +42,17 @@ class NewsArticle:
     published: Optional[datetime]
     source: str
     summary: str = ""
+    body_text: str = ""
+    scrape_metadata: Dict[str, Any] = field(default_factory=dict)
+    scrape_error: Optional[str] = None
 
     def text_for_sentiment(self) -> str:
+        if (self.body_text or "").strip():
+            # Cap very long bodies for lexicon speed; LLM gets separate capped list
+            body = self.body_text.strip()
+            if len(body) > 12000:
+                body = body[:12000] + "…"
+            return f"{self.title}. {body}".strip()
         return f"{self.title}. {self.summary}".strip()
 
 
@@ -135,7 +145,7 @@ class NewsCollector:
     ) -> List[NewsArticle]:
         items: List[NewsArticle] = []
         # Broad OR query; date filter applied after parse
-        q = f"{company_name} OR {symbol} OR SML Mahindra"
+        q = f"{company_name} OR {symbol}"
         url = (
             f"https://news.google.com/rss/search?q={quote_plus(q)}"
             f"&hl=en-IN&gl=IN&ceid=IN:en"
