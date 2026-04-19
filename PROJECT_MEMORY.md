@@ -13,8 +13,8 @@
 - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
 - **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance; optional final OpenAI **`ai_digest`** (toggle per run on equity single + `/api/tools/run/news` + agent tool). **`articles_preview`** uses dated-then-undated ordering so HTML discovery / undated rows are not dropped under tight preview caps; citations rows carry **`collector_source`** / **`body_scrape_present`** in metadata.
 - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
-- **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
-- **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.
+- **Entry:** CLI `main.py` (PEAD modes: recent / single / batch); dev **`./scripts/dev.sh`** (venv-aware `uvicorn` + `web/` Vite) or repo-root **`npm run dev`** (concurrently: API + Vite); UI **`/`** (chat) and **`/tools`** (unified equity-research tool; legacy `/tools/*` paths redirect here).
+- **Config:** `src/config/config.py` / `src/config/settings.py`, `.env` via `python-dotenv`; **`OPENAI_API_KEY`** required for **chat** and any tool path that calls OpenAI (e.g. news LLM / `ai_digest`, research desk, optional technical verdict). Plain data-only tool calls can run without it.
 - **Memory sync:** After editing this section, run `python3 scripts/sync_memory_readme.py` or manually update the README block between `MEMORY_SNAPSHOT` markers.
 - **Time:** Event anchors use `src/utils/time_compat.py` (naive UTC) so API/feed timestamps never trip pandas tz-naive vs tz-aware comparisons.
 - **Trade readiness:** `src/trade_context/` adds execution-context scoring (not a trade recommendation); folded into synthesis blend when present.
@@ -33,6 +33,7 @@
 
 | Date (UTC) | Area | Summary |
 |------------|------|---------|
+| 2026-04-19 | Docs | **README** refreshed: current stack (FastAPI + Vite), unified `/tools`, API table, repo layout, env/config, accurate OpenAI requirements; Support/disclaimer trimmed. **Snapshot** lines (Entry/Config) aligned; `sync_memory_readme.py` run. |
 | 2026-04-19 | News / docs | **`ai_digest` toggles** (symbol + market) on equity research + `PeadSingleRequest`; `include_ai_digest` on `NewsToolRequest`; agent `run_news_and_sentiment`; UI checkboxes on single-symbol tool + `ai_digest_skipped_by_request` messaging. **`articles_preview`** via `build_article_preview_rows` (dated then undated, URL dedupe). **`per_article`** lexicon cap raised. Citations **`metadata_json`**: `collector_source`, `body_scrape_present`. Memory Bank + this snapshot updated; **E2E citations UI** verification deferred. |
 | 2026-04-12 | News / UX | User report: news + **citations tool not working as expected** — logged in `memory-bank/progress.md` for follow-up (repro, SQLite, UTC filter, API). |
 | 2026-04-12 | News | Article **web scraping** (trafilatura) for first N URLs; **metadata** (hostname, author, date, word count); **bullish/bearish/neutral** aggregate (`stock_media_stance`, `per_article`); Google RSS query fixed (removed stray symbol); News tool API/UI: `end_date`, `scrape_bodies`, `max_scrape`. |

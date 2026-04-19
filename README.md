@@ -6,224 +6,160 @@
 > - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
 > - **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance; optional final OpenAI **`ai_digest`** (toggle per run on equity single + `/api/tools/run/news` + agent tool). **`articles_preview`** uses dated-then-undated ordering so HTML discovery / undated rows are not dropped under tight preview caps; citations rows carry **`collector_source`** / **`body_scrape_present`** in metadata.
 > - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
-> - **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
-> - **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.
+> - **Entry:** CLI `main.py` (PEAD modes: recent / single / batch); dev **`./scripts/dev.sh`** (venv-aware `uvicorn` + `web/` Vite) or repo-root **`npm run dev`** (concurrently: API + Vite); UI **`/`** (chat) and **`/tools`** (unified equity-research tool; legacy `/tools/*` paths redirect here).
+> - **Config:** `src/config/config.py` / `src/config/settings.py`, `.env` via `python-dotenv`; **`OPENAI_API_KEY`** required for **chat** and any tool path that calls OpenAI (e.g. news LLM / `ai_digest`, research desk, optional technical verdict). Plain data-only tool calls can run without it.
 > - **Memory sync:** After editing this section, run `python3 scripts/sync_memory_readme.py` or manually update the README block between `MEMORY_SNAPSHOT` markers.
 > - **Time:** Event anchors use `src/utils/time_compat.py` (naive UTC) so API/feed timestamps never trip pandas tz-naive vs tz-aware comparisons.
 > - **Trade readiness:** `src/trade_context/` adds execution-context scoring (not a trade recommendation); folded into synthesis blend when present.
 
 <!-- MEMORY_SNAPSHOT_END -->
 
-A comprehensive quantitative analysis tool for identifying and scoring Post-Earnings Announcement Drift (PEAD) opportunities in Indian equity markets.
+This repository is a **research stack** for **NSE-listed** names: classic **PEAD** (event-study windows, CARs, composite scoring), plus a **FastAPI** surface, **React** tools UI, **news/sentiment** collection (RSS, search, optional HTML discovery, optional article scrape), **trade-context** metrics, and an optional **PydanticAI** chat agent. Outputs are for **research and tooling only** — not investment advice.
 
 ## Overview
 
-PEAD (Post-Earnings Announcement Drift) is a well-documented market anomaly where stock prices continue to drift in the direction of an earnings surprise for weeks or months after the announcement. This tool provides rigorous quantitative analysis to identify and score PEAD opportunities.
+**PEAD (Post-Earnings Announcement Drift)** is the empirical pattern that prices can drift after earnings surprises. The Python core estimates a market model, builds abnormal and cumulative abnormal returns, and combines **five scored pillars** into a 0–100 composite (see `src/scoring/`).
 
-## Features
+**Equity research (calendar window)** — the path used by **`POST /api/tools/run/single`** and the **`/tools`** page — runs a **shared date range** for OHLCV, technicals (with chart payload where configured), **symbol-scoped news**, optional **broader market-context headlines**, **trade readiness**, optional **research desk** LLM synthesis, and on-disk JSON/artifacts when `output_dir` is set. Pipeline stages are selectable in the UI/API.
 
-### Core Analysis
-- **Market Model Estimation**: Estimates α and β parameters using OLS regression on 120-day pre-announcement window
-- **Abnormal Returns (AR)**: Calculates daily abnormal returns: AR = R_stock - (α + β * R_market)
-- **Cumulative Abnormal Returns (CAR)**: Computes CAR for multiple windows (1, 10, 30, 60, 90 days)
-- **Statistical Significance Testing**: T-tests, sign tests, and Wilcoxon tests for AR/CAR significance
+**CLI (`main.py`)** still supports **recent**, **single-announcement**, and **batch** PEAD runs for users who prefer the command line.
 
-### Comprehensive Scoring System (5 Components)
+## Features (summary)
 
-#### 1. Earnings Surprise (25% weight, max 70 points)
-- **EPS Surprise**: YoY/QoQ EPS growth analysis
-- **Revenue Surprise**: Revenue growth vs expectations
-- **Margin Expansion**: Operating leverage and margin improvement
-- **Guidance**: Forward guidance sentiment from announcement documents
+| Area | What you get |
+|------|----------------|
+| **PEAD core** | Market model (OLS), AR/CAR windows, significance tests, composite score + rating (`src/pead/`, `src/models/`, `src/scoring/`) |
+| **Data** | NSE + Yahoo (+ optional `jugaad-data` path); caching via `DataManager` |
+| **News** | Headline collection, optional **trafilatura** body scrape, TextBlob + optional OpenAI headline blend, optional final **`ai_digest`**; SQLite **citations** (`GET /api/news/articles`) |
+| **API** | FastAPI: **`/api/tools/*`**, **`/api/chat/stream`**, health, chat sessions — see [API & web](#api--web) |
+| **Web** | Vite + React + Tailwind: **`/`** chat, **`/tools`** unified equity research (legacy `/tools/news` etc. redirect here) |
+| **Agent** | PydanticAI coordinator + tools calling `PEADAnalyzer` and news/fundamentals/technical helpers (`src/agent/`) |
 
-#### 2. Price Reaction (20% weight, max 20 points)
-- **Day 0 Return**: Under-reaction scoring (small move + big surprise = high PEAD potential)
-- **Volume Spike**: Confirmation through trading volume analysis
-- **Gap Analysis**: Gap open and continuation patterns
-
-#### 3. Drift Confirmation (25% weight, max 25 points)
-- **CAR Magnitude**: Weighted across short to medium windows
-- **Statistical Significance**: P-value analysis across multiple windows
-- **Relative Strength**: Outperformance vs NIFTY 50
-- **Trend Continuity**: Technical indicators (MA, higher highs/lows, ROC)
-
-#### 4. Earnings Quality (15% weight, max 15 points)
-- **Source of Earnings**: Revenue-driven vs cost-cutting
-- **Cash Flow Quality**: CFO/Net Income ratio
-- **Balance Sheet Quality**: Working capital and liquidity trends
-
-#### 5. Contextual Factors (15% weight, max 15 points)
-- **Market Cap Category**: Mid-caps score highest (strongest PEAD)
-- **Sector Tailwinds**: Industry-specific scoring
-- **Track Record**: Historical earnings beat consistency
-- **Macro Environment**: Market volatility regime analysis
-
-### Data Sources
-- **Primary**: NSE India (via `nse` package)
-- **Fallback**: Yahoo Finance (for missing data)
-- **Documents**: PDF download and parsing for sentiment analysis
-
-### Output
-- **Composite Score**: 0-100 score with rating (STRONG BUY to STRONG SELL)
-- **Confidence Level**: Data quality and signal strength assessment
-- **Visualizations**:
-  - Price charts with announcement markers
-  - CAR evolution plots
-  - Component score breakdown
-  - Comparison dashboards for multiple stocks
-- **CSV Reports**: Detailed analysis summary for all stocks
-
-## Installation
+## Quick start
 
 ```bash
-# Clone the repository
 git clone <repository-url>
 cd pead-tool
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Research AI agent (PydanticAI) + chat UI
-
-The repo includes a **multi-agent** layer built with [PydanticAI](https://ai.pydantic.dev):
-
-- **Coordinator agent**: streams replies, calls tools to resolve earnings dates and run the full PEAD pipeline (`PEADAnalyzer`).
-- **Synthesis desk agent**: second model invoked via tool when narrative polish is needed.
-
-**Requirements:** set `OPENAI_API_KEY` (used by PydanticAI model strings such as `openai:gpt-4o-mini`). Optional: `PEAD_CORS_ORIGINS` for extra dev origins (comma-separated).
-
-**Optional long-term chat memory ([Mem0](https://github.com/mem0ai/mem0)):** install deps with `pip install -r requirements.txt` (includes `mem0ai`). Set `MEM0_ENABLED=true`. Memories are scoped by chat `session_id` unless you set `MEM0_DEFAULT_USER_ID` or send `mem0_user_id` on `POST /api/chat` / `POST /api/chat/stream`. Toggle per request with `use_mem0: false`. `GET /api/health` reports `mem0_enabled` (env) and `mem0_runtime` (env + import + key).
-
-**Boot API + UI together** (from repo root; Ctrl+C stops both):
-
-```bash
+python3 -m venv .venv && source .venv/bin/activate   # optional but recommended
 pip install -r requirements.txt
 cd web && npm install && cd ..
-# optional: activate your venv so ./scripts/dev.sh picks it up
-./scripts/dev.sh
-# same thing: make dev
 ```
 
-Alternative using **concurrently** (installs a small root `node_modules` once):
+**Environment:** copy `.env.sample` → `.env` if present, or set at least **`OPENAI_API_KEY`** for chat and any OpenAI-backed tool steps (news LLM / `ai_digest`, research desk, optional technical verdict). Data-only runs (e.g. fundamentals without LLM) may work without it.
+
+**Run API + web together** (default ports **8000** / **5173**; override with `UVICORN_PORT` / `VITE_PORT` for `scripts/dev.sh`):
 
 ```bash
-pip install -r requirements.txt && cd web && npm install && cd .. && npm install && npm run dev
+./scripts/dev.sh    # or: make dev
+```
+
+Alternative from repo root (uses root `devDependencies` **concurrently**):
+
+```bash
+npm install && npm run dev
 ```
 
 **Manual split** (two terminals):
 
 ```bash
-# Terminal 1 — backend
-export OPENAI_API_KEY=sk-...
-uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
+# Terminal 1 — API (uses .venv/bin/python if present)
+.venv/bin/python -m uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
 
-# Terminal 2 — frontend
+# Terminal 2 — UI (proxies /api → backend; see web/vite.config.ts)
 cd web && npm run dev
 ```
 
-Open `http://localhost:5173` — the dev server proxies `/api/*` to the FastAPI app.
+Open **`http://localhost:5173`**. Only the UI port is for humans in dev; the API is on **8000** unless you change it.
 
-- **Chat** (`/`) — streaming agent (`POST /api/chat/stream`, SSE). Non-streaming: `POST /api/chat`.
-- **Tools** (`/tools`) — form-driven PEAD runs (same filters as the CLI): `GET /api/tools/config`, `POST /api/tools/run/single`, `POST /api/tools/run/recent`. No OpenAI key required for these endpoints (only data vendors / optional news LLM if enabled).
+### Chat (PydanticAI + Mem0)
+
+- **Coordinator** streams replies and calls tools (`PEADAnalyzer`, news, calendar, etc.).
+- **Research desk** (when enabled) adds consolidated narrative — requires `OPENAI_API_KEY`.
+
+**Optional Mem0:** `MEM0_ENABLED=true` after `pip install` (see `requirements.txt`). Scope by chat `session_id` or `mem0_user_id` / `MEM0_DEFAULT_USER_ID`. Per request: `use_mem0: false`. **`GET /api/health`** exposes `mem0_enabled` / `mem0_runtime`.
+
+## API & web
+
+| Surface | Notes |
+|---------|--------|
+| **`/`** | Chat UI; **`POST /api/chat/stream`** (SSE), **`POST /api/chat`** |
+| **`/tools`** | Single **equity research** form: symbol, **inclusive YYYY-MM-DD range**, pipeline stage toggles, optional **`include_symbol_news_ai_digest` / `include_market_news_ai_digest`** (skip final OpenAI digest while testing) |
+| **Legacy routes** | `/tools/news`, `/tools/technical`, … → **redirect to `/tools`** (`web/src/App.tsx`) |
+| **`GET /api/tools/config`** | Defaults for news, CLI hints, pipeline stage ids |
+| **`POST /api/tools/run/single`** | Full equity research for one symbol + date range |
+| **Other `POST /api/tools/run/*`** | `recent`, `fundamentals`, `technical`, `news`, `scoring`, `trade-readiness`, `document-pdf`, `execution-snapshot`, `yahoo-calendar` — see `server/tools_routes.py` |
+| **`GET /api/news/articles`** | Citations rows from SQLite (`fetched_date` UTC, optional `symbol`) — `server/news_routes.py` |
+
+**OpenAI usage:** Chat always expects a key when using the agent. **`run/single`** and related routes only need a key when a selected stage invokes an LLM (news synthesis / `ai_digest`, research desk, technical AI verdict). Pure fundamentals/scoring/data steps can run without it.
 
 ## Dependencies
 
-- numpy >= 1.24.0
-- pandas >= 2.0.0
-- scipy >= 1.10.0
-- statsmodels >= 0.14.0
-- yfinance >= 0.2.28
-- nse >= 0.1.0
-- PyPDF2 >= 3.0.0
-- pdfplumber >= 0.10.0
-- matplotlib >= 3.7.0
-- seaborn >= 0.12.0
-- textblob >= 0.17.1
+Pinned in **`requirements.txt`**. Highlights:
+
+- **Core quant:** numpy, pandas, scipy, statsmodels, scikit-learn, yfinance, `nse`, `jugaad-data`, requests, beautifulsoup4  
+- **Documents:** PyPDF2, pdfplumber  
+- **Plots / reports:** matplotlib, seaborn, tabulate, tqdm  
+- **News:** feedparser, textblob, trafilatura  
+- **API & agent:** fastapi, uvicorn, openai, pydantic-ai, python-dotenv, mem0ai  
+
+Frontend: **`web/package.json`** (React 18, Vite, Tailwind, lightweight-charts where used).
 
 ## Usage
 
-### Analyze Recent Announcements
+### CLI (`main.py`)
 
 ```bash
-# Analyze top 10 recent earnings announcements
 python main.py --mode recent --top 10
-
-# With custom output directory
 python main.py --mode recent --top 10 --output ./results
-
-# Without caching (fresh data fetch)
 python main.py --mode recent --top 5 --no-cache
-```
 
-### Analyze Specific Stock
-
-```bash
-# Analyze specific announcement
 python main.py --mode single --symbol RELIANCE --date 2024-01-15
+python main.py --mode batch --file stocks.csv
 
-# Multiple examples
-python main.py --mode single --symbol TCS --date 2024-01-10
-python main.py --mode single --symbol INFY --date 2024-01-12
-```
-
-### Advanced Options
-
-```bash
-# Verbose logging
 python main.py --mode recent --top 10 --verbose
-
-# Disable visualizations (faster)
 python main.py --mode recent --top 10 --no-visualize
-
-# Help
 python main.py --help
 ```
 
-## Architecture
+For **calendar-window equity research** (same model as the web tool), use the **HTTP API** (`POST /api/tools/run/single`) or the **`/tools`** UI — not a separate `main.py` subcommand.
+
+### HTTP API
+
+Use **`GET /api/tools/config`** for defaults, then **`POST /api/tools/run/single`** with JSON body (`symbol`, `range_start`, `range_end`, stage toggles, optional `news_max_articles`, `include_symbol_news_ai_digest`, `include_market_news_ai_digest`, etc.). See **`server/tools_routes.py`** and OpenAPI at **`/docs`** when the server is running.
+
+## Repository layout
 
 ```
 pead-tool/
+├── main.py                      # CLI: recent / single / batch PEAD
+├── server/                      # FastAPI: app, tools_routes, chat, news citations
+├── web/                         # Vite + React (Chat + /tools)
+├── scripts/dev.sh               # API + Vite (venv-aware Python)
 ├── src/
-│   ├── config/
-│   │   └── settings.py          # Configuration parameters
-│   ├── data/
-│   │   ├── nse_fetcher.py       # NSE data fetching
-│   │   ├── yahoo_fetcher.py     # Yahoo Finance fallback
-│   │   └── data_manager.py      # Unified data interface with caching
-│   ├── documents/
-│   │   ├── pdf_downloader.py    # Download announcements
-│   │   └── pdf_parser.py        # PDF parsing and sentiment
-│   ├── models/
-│   │   ├── market_model.py      # α, β estimation (OLS)
-│   │   ├── abnormal_returns.py  # AR calculation
-│   │   └── car.py               # CAR computation
-│   ├── scoring/
-│   │   ├── earnings_surprise.py # Component 1 scorer
-│   │   ├── price_reaction.py    # Component 2 scorer
-│   │   ├── drift_confirmation.py# Component 3 scorer
-│   │   ├── earnings_quality.py  # Component 4 scorer
-│   │   ├── contextual.py        # Component 5 scorer
-│   │   └── composite_score.py   # Final composite scoring
-│   ├── analysis/
-│   │   └── pead_analyzer.py     # Main orchestrator
-│   └── utils/
-│       ├── statistical.py       # Statistical utilities
-│       └── visualization.py     # Plotting utilities
-├── main.py                       # Entry point
+│   ├── analysis/pead_analyzer.py           # Orchestrator: CLI + equity research entry
+│   ├── equity_research_pipeline/           # Windowed multi-stage pipeline
+│   ├── pead/, models/, scoring/            # Event study + composite score
+│   ├── data/                               # NSE / Yahoo / cache (DataManager)
+│   ├── news/                               # Collector, sentiment, scrape, citations preview
+│   ├── agent/                              # PydanticAI coordinator + tools
+│   ├── fundamentals/, technical/, trade_context/
+│   ├── documents/                          # PDF download / parse
+│   ├── persistence/                        # Chat + news SQLite helpers
+│   └── config/                             # config.py, settings.py
+├── memory-bank/               # Durable project context (read by agents)
+├── PROJECT_MEMORY.md          # Changelog + README snapshot source
+├── issues-to-fix/             # Ad-hoc backlog notes (optional)
 ├── requirements.txt
 └── README.md
 ```
 
 ## Configuration
 
-Edit `src/config/settings.py` to customize:
-
-- **Market Model**: Estimation window (default: 120 days)
-- **CAR Windows**: Analysis windows (default: [1, 10, 30, 60, 90] days)
-- **Scoring Weights**: Component weights (default: 25%, 20%, 25%, 15%, 15%)
-- **Thresholds**: Volume spike, margin expansion, significance levels
-- **Data Caching**: Cache directory and TTL
+- **Environment:** `.env` (see `.env.sample` if provided) loaded via **`python-dotenv`**; many keys are read through **`src/config/config.py`**.  
+- **Python defaults:** **`src/config/settings.py`** — market model window, CAR windows, scoring weights, thresholds, cache paths.  
+- **CORS:** `PEAD_CORS_ORIGINS` (comma-separated) for extra browser origins in dev.  
+- **SQLite:** `CHAT_SQLITE_PATH` (chat sessions); news citations default to the same DB unless **`NEWS_SQLITE_PATH`** is set.  
+- **News tuning:** e.g. `NEWS_HTML_DISCOVERY_ENABLED`, `NEWSAPI_API_KEY`, model names — surfaced in **`GET /api/tools/config`** where applicable.
 
 ## Methodology
 
@@ -256,6 +192,8 @@ Score = Σ (Normalized_Component_i * Weight_i)
 - Final score 0-100 with rating assignment
 
 ## Output Example
+
+CLI-style text report (shape varies by mode). **Ratings** (e.g. BUY / SELL strings) are **internal composite labels**, not trade instructions.
 
 ```
 ================================================================================
@@ -337,16 +275,12 @@ Contributions welcome! Please:
 
 ## Support
 
-For issues, questions, or suggestions:
-- Open an issue on GitHub
-- Email: [your-email]
+Open an issue on the project tracker with repro steps (CLI command, API payload, or UI path) and environment (Python version, OS).
 
 ## Disclaimer
 
-This tool is for educational and research purposes only. Not financial advice.
-Past performance does not guarantee future results. Always do your own research
-and consult with qualified financial advisors before making investment decisions.
+This software is for **education and research** only. It is **not** investment, legal, or tax advice. Composite labels and narrative text are **heuristic outputs** — validate against primary data and your own process before relying on them.
 
 ---
 
-**Think like a quant. Trade like a professional. Built with ❤️ for the Indian markets.**
+**Documentation:** Durable context lives in **`memory-bank/`**; dated changes in **[`PROJECT_MEMORY.md`](PROJECT_MEMORY.md)**. After editing the snapshot there, run **`python3 scripts/sync_memory_readme.py`** to refresh the quoted block at the top of this README.
