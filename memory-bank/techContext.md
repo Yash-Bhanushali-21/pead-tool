@@ -14,9 +14,10 @@
 ## Repo layout (short)
 
 - `src/` — PEAD pipeline, data, news, agent, persistence, config (`src/config/settings.py`).
+- **`src/data/`** — **`DataManager`** façade over **`OHLCVSource`** implementations (**NSE**, **Yahoo**, **Jugaad**); merge/fallback and pickle cache; grep-friendly logs (`data_fetch`, `data_manager.*`). Re-export: `from src.data import DataManager, OHLCVSource`.
 - `server/` — HTTP API, SSE chat.
 - `web/` — Vite app, `npm run dev` (default port 5173).
-- `scripts/dev.sh` / `make dev` — API + web together (see README).
+- `scripts/dev.sh` / `make dev` — API + web together (see README). Ports default **8000** / **5173** (`UVICORN_PORT` / `VITE_PORT` for `scripts/dev.sh`).
 
 ## Environment
 
@@ -32,5 +33,5 @@
 
 ## Constraints
 
-- **Indian equities:** NSE symbols; index proxy `^NSEI` in config.
+- **Indian equities:** NSE symbols; index proxy **`MARKET_INDEX`** (default **`^NSEI`**) in config. Benchmark/RS code uses **`DataManager.get_market_data`** (NSE NIFTY + Yahoo index) — not the equity stock path for the index ticker.
 - **README memory block:** `PROJECT_MEMORY.md` section `## Current snapshot` syncs into `README.md` via `python3 scripts/sync_memory_readme.py` (intro line in the script points readers at `memory-bank/` first, then `PROJECT_MEMORY.md` for changelog).

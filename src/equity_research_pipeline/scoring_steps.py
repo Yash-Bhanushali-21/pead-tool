@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.config.config import config
 from src.equity_research_pipeline.context import EquityResearchRunContext
+from src.equity_research_pipeline.logging_utils import format_equity_run_ctx
 from src.equity_research_pipeline.options import EquityResearchRunOptions
 from src.utils.time_compat import to_naive_utc_datetime
 from src.models.abnormal_returns import AbnormalReturns
@@ -22,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 def scoring_step_company_and_pdf_meta(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
+    logger.info(
+        "scoring_pipeline.stage.company_and_pdf_meta %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     company_info = an.data_manager.get_company_fundamentals(ctx.symbol)
     ctx.workspace["company_info"] = company_info
     assert ctx.announcement_date is not None
@@ -34,9 +39,19 @@ def scoring_step_company_and_pdf_meta(ctx: EquityResearchRunContext, an: EquityR
         else [],
         "has_guidance": bool((pdf_analysis.get("guidance") or {}).get("has_guidance")),
     }
+    logger.info(
+        "scoring_pipeline.stage.company_and_pdf_meta %s event=done text_chars=%s metric_keys=%s",
+        format_equity_run_ctx(ctx),
+        ctx.results["pdf_analysis_meta"]["text_chars"],
+        len(ctx.results["pdf_analysis_meta"]["metric_keys"]),
+    )
 
 
 def scoring_step_market_model(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
+    logger.info(
+        "scoring_pipeline.stage.market_model %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     stock_data: pd.DataFrame = ctx.workspace["stock_data"]
     market_data: pd.DataFrame = ctx.workspace["market_data"]
     market_model = MarketModel()
@@ -47,9 +62,19 @@ def scoring_step_market_model(ctx: EquityResearchRunContext, an: EquityResearchA
     )
     ctx.workspace["market_model_obj"] = market_model
     ctx.results["market_model"] = model_params
+    logger.info(
+        "scoring_pipeline.stage.market_model %s event=done n_obs=%s r_squared=%s",
+        format_equity_run_ctx(ctx),
+        model_params.get("n_observations"),
+        model_params.get("r_squared"),
+    )
 
 
 def scoring_step_ar_car(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
+    logger.info(
+        "scoring_pipeline.stage.abnormal_returns_and_car %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     stock_data: pd.DataFrame = ctx.workspace["stock_data"]
     market_data: pd.DataFrame = ctx.workspace["market_data"]
     market_model: MarketModel = ctx.workspace["market_model_obj"]
@@ -80,9 +105,19 @@ def scoring_step_ar_car(ctx: EquityResearchRunContext, an: EquityResearchAnalyze
     )
     ctx.workspace["ar_data"] = ar_data
     ctx.results["car_data"] = car_data
+    logger.info(
+        "scoring_pipeline.stage.abnormal_returns_and_car %s event=done ar_rows=%s car_windows=%s",
+        format_equity_run_ctx(ctx),
+        ctx.results["abnormal_returns_summary"].get("rows"),
+        sorted(car_data.keys()) if isinstance(car_data, dict) else None,
+    )
 
 
 def scoring_step_scores_and_composite(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
+    logger.info(
+        "scoring_pipeline.stage.scores_and_composite %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     pdf_analysis: Dict[str, Any] = ctx.workspace["pdf_analysis"]
     stock_data: pd.DataFrame = ctx.workspace["stock_data"]
     market_data: pd.DataFrame = ctx.workspace["market_data"]
@@ -115,6 +150,13 @@ def scoring_step_scores_and_composite(ctx: EquityResearchRunContext, an: EquityR
         data_quality=data_quality,
     )
     ctx.results["composite_score"] = composite
+    comp = composite if isinstance(composite, dict) else {}
+    logger.info(
+        "scoring_pipeline.stage.scores_and_composite %s event=done composite_score=%s rating=%s",
+        format_equity_run_ctx(ctx),
+        comp.get("composite_score"),
+        comp.get("rating"),
+    )
 
 
 def new_scoring_context(symbol: str, announcement_date: Any) -> EquityResearchRunContext:

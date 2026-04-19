@@ -9,12 +9,15 @@ from typing import Any, Dict
 import pandas as pd
 
 from src.technical import TechnicalAnalyzer
+from src.technical.market_benchmark import aligned_market_index_close
 from src.trade_context.trade_readiness import compute_trade_context
 
 
 def build_light_results_for_trade_context(
     symbol: str,
     stock_data: pd.DataFrame,
+    *,
+    data_manager=None,
 ) -> Dict[str, Any]:
     """
     Minimal ``results`` for :func:`compute_trade_context` — **no synthetic PEAD/fundamental/news**.
@@ -27,7 +30,16 @@ def build_light_results_for_trade_context(
         end_ts = pd.Timestamp(end)
     else:
         end_ts = pd.Timestamp(end)
-    ta = TechnicalAnalyzer().analyze(stock_data, end_ts, symbol=symbol)
+    bench, bench_sym = (None, "")
+    if data_manager is not None:
+        bench, bench_sym = aligned_market_index_close(data_manager, stock_data)
+    ta = TechnicalAnalyzer().analyze(
+        stock_data,
+        end_ts,
+        symbol=symbol,
+        benchmark_close=bench,
+        benchmark_symbol=bench_sym,
+    )
     return {"technical_analysis": ta}
 
 
@@ -51,7 +63,7 @@ def fetch_light_trade_context(
             "error": "Insufficient price history for execution snapshot",
             "symbol": sym,
         }
-    results = build_light_results_for_trade_context(sym, df)
+    results = build_light_results_for_trade_context(sym, df, data_manager=data_manager)
     tc = compute_trade_context(results, df)
     return {
         "success": True,

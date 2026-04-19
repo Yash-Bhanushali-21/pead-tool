@@ -6,12 +6,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from src.analysis.pead_analyzer import PEADAnalyzer
+from src.analysis.stock_analyzer import StockAnalyzer
 
 
 @dataclass
 class ResearchDeps:
     """Injected into the coordinator agent run."""
 
-    analyzer: PEADAnalyzer
+    analyzer: StockAnalyzer
     output_base: Path

@@ -132,14 +132,19 @@ export function TechnicalAnalysisChart({ chart, calendarWindow }: TechnicalAnaly
   const rsiRef = useRef<HTMLDivElement>(null);
   const macdRef = useRef<HTMLDivElement>(null);
   const stochRef = useRef<HTMLDivElement>(null);
+  const adxRef = useRef<HTMLDivElement>(null);
 
   const [rangeId, setRangeId] = useState<ChartCalendarRangeId>("all");
   const [showBB, setShowBB] = useState(true);
   const [showSR, setShowSR] = useState(true);
+  const [showVwap, setShowVwap] = useState(true);
+  const [showSupertrend, setShowSupertrend] = useState(true);
+  const [showKeltner, setShowKeltner] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
   const [showRsi, setShowRsi] = useState(true);
   const [showMacd, setShowMacd] = useState(true);
   const [showStoch, setShowStoch] = useState(true);
+  const [showAdx, setShowAdx] = useState(true);
 
   const displayChart = useMemo(
     () => sliceChartByCalendarRange(chart, rangeId),
@@ -233,11 +238,45 @@ export function TechnicalAnalysisChart({ chart, calendarWindow }: TechnicalAnaly
       }
     }
 
+    const stP = displayChart.periods.supertrend ?? 10;
+    if (showVwap && ind.vwap?.length) {
+      const vw = priceChart.addLineSeries({
+        color: "rgba(168, 85, 247, 0.95)",
+        lineWidth: 2,
+        lineStyle: LineStyle.Solid,
+        title: "Anchored VWAP",
+      });
+      vw.setData(lineData(times, ind.vwap));
+    }
+    if (showSupertrend && ind.supertrend?.length) {
+      const st = priceChart.addLineSeries({
+        color: "rgba(34, 211, 238, 0.9)",
+        lineWidth: 2,
+        title: `Supertrend ${stP}`,
+      });
+      st.setData(lineData(times, ind.supertrend));
+    }
+    if (showKeltner && ind.keltner_upper?.length && ind.keltner_lower?.length) {
+      const ku = priceChart.addLineSeries({
+        color: "rgba(251, 113, 133, 0.7)",
+        lineWidth: 1,
+        title: "Keltner upper",
+      });
+      ku.setData(lineData(times, ind.keltner_upper));
+      const kl = priceChart.addLineSeries({
+        color: "rgba(52, 211, 153, 0.7)",
+        lineWidth: 1,
+        title: "Keltner lower",
+      });
+      kl.setData(lineData(times, ind.keltner_lower));
+    }
+
     const followers: IChartApi[] = [];
     let volChart: IChartApi | null = null;
     let rsiChart: IChartApi | null = null;
     let macdChart: IChartApi | null = null;
     let stochChart: IChartApi | null = null;
+    let adxChart: IChartApi | null = null;
 
     const vEl = volRef.current;
     if (showVolume && vEl) {
@@ -338,6 +377,43 @@ export function TechnicalAnalysisChart({ chart, calendarWindow }: TechnicalAnaly
       followers.push(stochChart);
     }
 
+    const aEl = adxRef.current;
+    if (showAdx && aEl && ind.adx?.length) {
+      adxChart = createChart(aEl, {
+        ...commonLayout,
+        width: w,
+        height: 100,
+        rightPriceScale: { borderColor: "#334155" },
+        timeScale: { visible: false },
+      });
+      const adxP = displayChart.periods.adx ?? 14;
+      const adxL = adxChart.addLineSeries({
+        color: "#e879f9",
+        lineWidth: 2,
+        title: `ADX ${adxP}`,
+      });
+      adxL.setData(lineData(times, ind.adx));
+      const pdiL = adxChart.addLineSeries({
+        color: "#4ade80",
+        lineWidth: 1,
+        title: "+DI",
+      });
+      pdiL.setData(lineData(times, ind.plus_di ?? []));
+      const mdiL = adxChart.addLineSeries({
+        color: "#f87171",
+        lineWidth: 1,
+        title: "-DI",
+      });
+      mdiL.setData(lineData(times, ind.minus_di ?? []));
+      adxL.createPriceLine({
+        price: 25,
+        color: "rgba(148, 163, 184, 0.45)",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+      });
+      followers.push(adxChart);
+    }
+
     if (followers.length) syncCharts(priceChart, followers);
 
     const charts: IChartApi[] = [priceChart, ...followers];
@@ -352,7 +428,19 @@ export function TechnicalAnalysisChart({ chart, calendarWindow }: TechnicalAnaly
       ro.disconnect();
       for (const c of charts) c.remove();
     };
-  }, [displayChart, showBB, showSR, showVolume, showRsi, showMacd, showStoch]);
+  }, [
+    displayChart,
+    showBB,
+    showSR,
+    showVwap,
+    showSupertrend,
+    showKeltner,
+    showVolume,
+    showRsi,
+    showMacd,
+    showStoch,
+    showAdx,
+  ]);
 
   if (!chart.bars?.length) return null;
 
@@ -366,7 +454,9 @@ export function TechnicalAnalysisChart({ chart, calendarWindow }: TechnicalAnaly
   return (
     <div className="mt-6 space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-300">Price, Bollinger &amp; pivot S/R</h3>
+        <h3 className="text-sm font-semibold text-slate-300">
+          Price — Bollinger, VWAP, Supertrend, Keltner, pivot S/R
+        </h3>
         <p className="max-w-xl text-xs text-slate-500">{displayChart.support_resistance.method}</p>
       </div>
 
@@ -407,10 +497,14 @@ export function TechnicalAnalysisChart({ chart, calendarWindow }: TechnicalAnaly
       <div className="flex flex-wrap gap-2">
         <Toggle id="ch-bb" checked={showBB} onChange={setShowBB} label="Bollinger" />
         <Toggle id="ch-sr" checked={showSR} onChange={setShowSR} label="S/R lines" />
+        <Toggle id="ch-vwap" checked={showVwap} onChange={setShowVwap} label="VWAP" />
+        <Toggle id="ch-st" checked={showSupertrend} onChange={setShowSupertrend} label="Supertrend" />
+        <Toggle id="ch-kc" checked={showKeltner} onChange={setShowKeltner} label="Keltner" />
         <Toggle id="ch-vol" checked={showVolume} onChange={setShowVolume} label="Volume pane" />
         <Toggle id="ch-rsi" checked={showRsi} onChange={setShowRsi} label="RSI" />
         <Toggle id="ch-macd" checked={showMacd} onChange={setShowMacd} label="MACD" />
         <Toggle id="ch-stoch" checked={showStoch} onChange={setShowStoch} label="Stochastic" />
+        <Toggle id="ch-adx" checked={showAdx} onChange={setShowAdx} label="ADX / DI" />
       </div>
 
       {reqStart && reqEnd ? (
@@ -477,6 +571,14 @@ export function TechnicalAnalysisChart({ chart, calendarWindow }: TechnicalAnaly
         </>
       ) : (
         <div ref={stochRef} className="hidden" />
+      )}
+      {showAdx ? (
+        <>
+          <h3 className="pt-2 text-sm font-semibold text-slate-300">ADX / +DI / −DI</h3>
+          <div ref={adxRef} className="w-full overflow-hidden rounded-lg border border-surface-border" />
+        </>
+      ) : (
+        <div ref={adxRef} className="hidden" />
       )}
     </div>
   );

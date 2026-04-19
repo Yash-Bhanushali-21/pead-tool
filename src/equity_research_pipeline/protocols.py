@@ -1,4 +1,4 @@
-"""Structural typing for pipeline stages (``PEADAnalyzer`` satisfies this protocol)."""
+"""Structural typing for pipeline stages (``StockAnalyzer`` satisfies this protocol)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from src.utils.visualization import Visualizer
 
 
 class EquityResearchAnalyzerServices(Protocol):
-    """Subset of ``PEADAnalyzer`` used by scoring-only PEAD stages and shared services."""
+    """Subset of ``StockAnalyzer`` used by scoring-only pipeline stages and shared services."""
 
     data_manager: DataManager
     pdf_downloader: PDFDownloader

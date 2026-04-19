@@ -12,6 +12,8 @@
 
 - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
 - **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance; optional final OpenAI **`ai_digest`** (toggle per run on equity single + `/api/tools/run/news` + agent tool). **`articles_preview`** uses dated-then-undated ordering so HTML discovery / undated rows are not dropped under tight preview caps; citations rows carry **`collector_source`** / **`body_scrape_present`** in metadata.
+- **Data / OHLCV:** **`DataManager`** composes NSE, Yahoo, and optional **jugaad-data** behind **`OHLCVSource`**; exports `DataManager`, `OHLCVSource` from `src/data/__init__.py`. Vendor ops log with **`data_fetch`** / **`data_manager.*`** (symbol, window, cache hit/miss, fallback reasons). Market benchmark / relative strength uses **`get_market_data`** + Yahoo index history for **`MARKET_INDEX`** (e.g. **`^NSEI`**), not the equity stock Yahoo suffix path for indices.
+- **Observability:** Equity research and scoring pipelines log stage boundaries and timings (`equity_research.pipeline`, per-stage `equity_research.stage.*`, `scoring_pipeline.stage.*`) with **`run_id`** / **`symbol`**; research desk LLM calls log model and errors with tracebacks when applicable.
 - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
 - **Entry:** CLI `main.py` (PEAD modes: recent / single / batch); dev **`./scripts/dev.sh`** (venv-aware `uvicorn` + `web/` Vite) or repo-root **`npm run dev`** (concurrently: API + Vite); UI **`/`** (chat) and **`/tools`** (unified equity-research tool; legacy `/tools/*` paths redirect here).
 - **Config:** `src/config/config.py` / `src/config/settings.py`, `.env` via `python-dotenv`; **`OPENAI_API_KEY`** required for **chat** and any tool path that calls OpenAI (e.g. news LLM / `ai_digest`, research desk, optional technical verdict). Plain data-only tool calls can run without it.
@@ -33,6 +35,7 @@
 
 | Date (UTC) | Area | Summary |
 |------------|------|---------|
+| 2026-04-19 | Data / observability / backlog | **`OHLCVSource`** + `DataManager` exports; structured **`data_fetch`** / **`data_manager`** logging (NSE/Yahoo/Jugaad); **`aligned_market_index_close`** uses **`get_market_data`** / Yahoo index (fixes **`^NSEI.NS`**); Yahoo preserves **`^`** tickers in **`nse_to_yahoo_symbol`**. Equity research + scoring + desk **pipeline logging** (`format_equity_run_ctx`, stage traces). **Backlog:** Zerodha (Kite) OHLCV integration drafted in **`issues-to-fix/README.md`** §4. Memory Bank updated; **`sync_memory_readme.py`** run. |
 | 2026-04-19 | Docs | **README** refreshed: current stack (FastAPI + Vite), unified `/tools`, API table, repo layout, env/config, accurate OpenAI requirements; Support/disclaimer trimmed. **Snapshot** lines (Entry/Config) aligned; `sync_memory_readme.py` run. |
 | 2026-04-19 | News / docs | **`ai_digest` toggles** (symbol + market) on equity research + `PeadSingleRequest`; `include_ai_digest` on `NewsToolRequest`; agent `run_news_and_sentiment`; UI checkboxes on single-symbol tool + `ai_digest_skipped_by_request` messaging. **`articles_preview`** via `build_article_preview_rows` (dated then undated, URL dedupe). **`per_article`** lexicon cap raised. Citations **`metadata_json`**: `collector_source`, `body_scrape_present`. Memory Bank + this snapshot updated; **E2E citations UI** verification deferred. |
 | 2026-04-12 | News / UX | User report: news + **citations tool not working as expected** — logged in `memory-bank/progress.md` for follow-up (repro, SQLite, UTC filter, API). |
@@ -48,6 +51,7 @@
 
 ## Open questions / backlog
 
+- **Optional data vendor:** **Zerodha (Kite Connect)** for additional OHLCV/candle coverage — see **`issues-to-fix/README.md`** §4 (auth, merge order, compliance).
 - **News + citations:** Re-verify with a repro run (RSS + HTML discovery mix): `articles_preview`, `per_article`, `persisted_citations`, citations list API + UTC `fetched_date` vs UI. Prior “not working” report partially addressed by preview ordering + metadata; remaining issues tracked in **`memory-bank/progress.md`**.
 - **Optional:** Standalone news tool page UI for `include_ai_digest` (API already supports). Optional separate toggle for headline **`_llm_synthesis`** vs **`ai_digest`**.
 

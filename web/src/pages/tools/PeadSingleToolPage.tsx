@@ -35,6 +35,7 @@ export default function PeadSingleToolPage() {
   const [stageToggles, setStageToggles] = useState<StageToggleMap>(defaultStageTogglesAllOn);
   const [includeSymbolNewsAiDigest, setIncludeSymbolNewsAiDigest] = useState(true);
   const [includeMarketNewsAiDigest, setIncludeMarketNewsAiDigest] = useState(true);
+  const [technicalIncludeAiVerdict, setTechnicalIncludeAiVerdict] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +75,7 @@ export default function PeadSingleToolPage() {
         include_market_sentiment: stageToggles.run_market_sentiment_tool,
         include_symbol_news_ai_digest: includeSymbolNewsAiDigest,
         include_market_news_ai_digest: includeMarketNewsAiDigest,
+        technical_include_ai_verdict: technicalIncludeAiVerdict,
         output_dir: outputDir || undefined,
       };
       if (newsMaxArticles !== "") body.news_max_articles = Number(newsMaxArticles);
@@ -132,6 +134,15 @@ export default function PeadSingleToolPage() {
             className="rounded border-surface-border"
           />
           Market sentiment: OpenAI <span className="font-mono text-slate-500">ai_digest</span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={technicalIncludeAiVerdict}
+            onChange={(e) => setTechnicalIncludeAiVerdict(e.target.checked)}
+            className="rounded border-surface-border"
+          />
+          After technicals: AI trade plan (S/R, entry & exit levels)
         </label>
       </div>
 

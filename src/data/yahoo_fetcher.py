@@ -20,7 +20,9 @@ _YAHOO_TAIL_ONLY_SLACK_DAYS = 14
 
 
 class YahooDataFetcher:
-    """Fetch data from Yahoo Finance as fallback"""
+    """Fetch data from Yahoo Finance as fallback."""
+
+    SOURCE_ID = "yahoo"
 
     @staticmethod
     def _squash_multilevel_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -74,6 +76,9 @@ class YahooDataFetcher:
         str
             Yahoo Finance symbol (e.g., 'RELIANCE.NS')
         """
+        # Yahoo index / futures tickers use caret or vendor-specific roots — do not append .NS
+        if nse_symbol.startswith("^"):
+            return nse_symbol
         # NSE stocks have .NS suffix, BSE have .BO
         if not nse_symbol.endswith('.NS') and not nse_symbol.endswith('.BO'):
             return f"{nse_symbol}.NS"
@@ -104,27 +109,46 @@ class YahooDataFetcher:
         """
         try:
             yahoo_symbol = self.nse_to_yahoo_symbol(symbol)
-            logger.info(f"Fetching Yahoo data for {yahoo_symbol}")
-
-            ticker = yf.Ticker(yahoo_symbol)
             # yfinance accepts datetime.date; avoid passing datetimes that confuse strict builds.
             start_d = to_calendar_date(start_date)
             end_d = to_calendar_date(end_date)
             end_exclusive = end_d + timedelta(days=1)
+            logger.info(
+                "data_fetch source=yahoo kind=equity_ohlcv input_symbol=%s yahoo_symbol=%s "
+                "api=yfinance.Ticker.history start=%s end=%s (yfinance end is exclusive; "
+                "passing end=%s) auto_adjust=True actions=False",
+                symbol,
+                yahoo_symbol,
+                start_d,
+                end_exclusive,
+                end_d,
+            )
+
+            ticker = yf.Ticker(yahoo_symbol)
             df = ticker.history(start=start_d, end=end_exclusive, auto_adjust=True, actions=False)
             df = self._squash_multilevel_columns(df)
 
             if df.empty:
-                logger.warning(f"No Yahoo data for {yahoo_symbol}")
+                logger.warning(
+                    "data_fetch source=yahoo kind=equity_ohlcv yahoo_symbol=%s result=empty "
+                    "requested_start=%s requested_end_inclusive=%s",
+                    yahoo_symbol,
+                    start_d,
+                    end_d,
+                )
                 return None
             if "Close" not in df.columns:
-                logger.warning("Yahoo response for %s has no Close column after normalize", yahoo_symbol)
+                logger.warning(
+                    "data_fetch source=yahoo kind=equity_ohlcv yahoo_symbol=%s result=invalid "
+                    "reason=no_close_column",
+                    yahoo_symbol,
+                )
                 return None
 
             if self._yahoo_tail_only_slice(df, start_d):
                 logger.warning(
-                    "Yahoo range query for %s is tail-only (first bar %s vs requested %s); "
-                    "retrying period=max and clipping to window",
+                    "data_fetch source=yahoo kind=equity_ohlcv yahoo_symbol=%s repair=period_max "
+                    "reason=tail_only_slice first_bar=%s requested_start=%s",
                     yahoo_symbol,
                     self._calendar_first_index_day(df),
                     start_d,
@@ -142,7 +166,8 @@ class YahooDataFetcher:
                     ):
                         df = clipped
                         logger.info(
-                            "Yahoo period=max repaired history for %s (%d rows in window)",
+                            "data_fetch source=yahoo kind=equity_ohlcv yahoo_symbol=%s "
+                            "repair=period_max result=applied rows_in_window=%d",
                             yahoo_symbol,
                             len(df),
                         )
@@ -153,11 +178,24 @@ class YahooDataFetcher:
             # Ensure date index
             df.index.name = "Date"
 
-            logger.info(f"Fetched {len(df)} rows from Yahoo for {yahoo_symbol}")
+            idx = df.index
+            logger.info(
+                "data_fetch source=yahoo kind=equity_ohlcv yahoo_symbol=%s result=ok rows=%d "
+                "bar_first=%s bar_last=%s",
+                yahoo_symbol,
+                len(df),
+                pd.Timestamp(idx.min()).date().isoformat() if len(idx) else None,
+                pd.Timestamp(idx.max()).date().isoformat() if len(idx) else None,
+            )
             return df
 
         except Exception as e:
-            logger.error(f"Error fetching Yahoo data for {symbol}: {e}")
+            logger.error(
+                "data_fetch source=yahoo kind=equity_ohlcv input_symbol=%s error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return None
 
     def get_index_data(
@@ -184,26 +222,44 @@ class YahooDataFetcher:
             Index data
         """
         try:
-            logger.info(f"Fetching Yahoo index data for {index_symbol}")
-
-            ticker = yf.Ticker(index_symbol)
             start_d = to_calendar_date(start_date)
             end_d = to_calendar_date(end_date)
             end_exclusive = end_d + timedelta(days=1)
+            logger.info(
+                "data_fetch source=yahoo kind=index_ohlcv yahoo_symbol=%s "
+                "api=yfinance.Ticker.history start=%s end=%s (yfinance end exclusive; inclusive_end=%s) "
+                "auto_adjust=True actions=False",
+                index_symbol,
+                start_d,
+                end_exclusive,
+                end_d,
+            )
+
+            ticker = yf.Ticker(index_symbol)
             df = ticker.history(start=start_d, end=end_exclusive, auto_adjust=True, actions=False)
             df = self._squash_multilevel_columns(df)
 
             if df.empty:
-                logger.warning(f"No Yahoo data for index {index_symbol}")
+                logger.warning(
+                    "data_fetch source=yahoo kind=index_ohlcv yahoo_symbol=%s result=empty "
+                    "requested_start=%s requested_end_inclusive=%s",
+                    index_symbol,
+                    start_d,
+                    end_d,
+                )
                 return None
             if "Close" not in df.columns:
-                logger.warning("Yahoo index response for %s has no Close after normalize", index_symbol)
+                logger.warning(
+                    "data_fetch source=yahoo kind=index_ohlcv yahoo_symbol=%s result=invalid "
+                    "reason=no_close_column",
+                    index_symbol,
+                )
                 return None
 
             if self._yahoo_tail_only_slice(df, start_d):
                 logger.warning(
-                    "Yahoo range query for index %s is tail-only (first bar %s vs requested %s); "
-                    "retrying period=max",
+                    "data_fetch source=yahoo kind=index_ohlcv yahoo_symbol=%s repair=period_max "
+                    "reason=tail_only_slice first_bar=%s requested_start=%s",
                     index_symbol,
                     self._calendar_first_index_day(df),
                     start_d,
@@ -221,7 +277,8 @@ class YahooDataFetcher:
                     ):
                         df = clipped
                         logger.info(
-                            "Yahoo period=max repaired index history for %s (%d rows in window)",
+                            "data_fetch source=yahoo kind=index_ohlcv yahoo_symbol=%s "
+                            "repair=period_max result=applied rows_in_window=%d",
                             index_symbol,
                             len(df),
                         )
@@ -229,11 +286,24 @@ class YahooDataFetcher:
             df["Return"] = df["Close"].pct_change()
             df.index.name = "Date"
 
-            logger.info(f"Fetched {len(df)} index rows from Yahoo")
+            idx = df.index
+            logger.info(
+                "data_fetch source=yahoo kind=index_ohlcv yahoo_symbol=%s result=ok rows=%d "
+                "bar_first=%s bar_last=%s",
+                index_symbol,
+                len(df),
+                pd.Timestamp(idx.min()).date().isoformat() if len(idx) else None,
+                pd.Timestamp(idx.max()).date().isoformat() if len(idx) else None,
+            )
             return df
 
         except Exception as e:
-            logger.error(f"Error fetching Yahoo index data: {e}")
+            logger.error(
+                "data_fetch source=yahoo kind=index_ohlcv yahoo_symbol=%s error=%s",
+                index_symbol,
+                e,
+                exc_info=True,
+            )
             return None
 
     def get_company_info(self, symbol: str) -> Dict:
@@ -252,6 +322,12 @@ class YahooDataFetcher:
         """
         try:
             yahoo_symbol = self.nse_to_yahoo_symbol(symbol)
+            logger.info(
+                "data_fetch source=yahoo kind=company_info input_symbol=%s yahoo_symbol=%s "
+                "api=yfinance.Ticker.info",
+                symbol,
+                yahoo_symbol,
+            )
             ticker = yf.Ticker(yahoo_symbol)
             info = ticker.info
 
@@ -271,7 +347,12 @@ class YahooDataFetcher:
             }
 
         except Exception as e:
-            logger.error(f"Error fetching Yahoo company info for {symbol}: {e}")
+            logger.error(
+                "data_fetch source=yahoo kind=company_info input_symbol=%s error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return {}
 
     def get_financials(self, symbol: str) -> Dict[str, pd.DataFrame]:
@@ -290,6 +371,12 @@ class YahooDataFetcher:
         """
         try:
             yahoo_symbol = self.nse_to_yahoo_symbol(symbol)
+            logger.info(
+                "data_fetch source=yahoo kind=financials input_symbol=%s yahoo_symbol=%s "
+                "api=yfinance (financials balance_sheet cashflow quarterly_financials)",
+                symbol,
+                yahoo_symbol,
+            )
             ticker = yf.Ticker(yahoo_symbol)
 
             financials = {
@@ -299,11 +386,19 @@ class YahooDataFetcher:
                 'quarterly_financials': ticker.quarterly_financials,
             }
 
-            logger.info(f"Fetched financials for {yahoo_symbol}")
+            logger.info(
+                "data_fetch source=yahoo kind=financials yahoo_symbol=%s result=ok",
+                yahoo_symbol,
+            )
             return financials
 
         except Exception as e:
-            logger.error(f"Error fetching financials for {symbol}: {e}")
+            logger.error(
+                "data_fetch source=yahoo kind=financials input_symbol=%s error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return {}
 
     def get_yoy_quarter_metrics(self, symbol: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -316,6 +411,12 @@ class YahooDataFetcher:
         empty: Tuple[Dict[str, Any], Dict[str, Any]] = ({}, {})
         try:
             yahoo_symbol = self.nse_to_yahoo_symbol(symbol)
+            logger.info(
+                "data_fetch source=yahoo kind=yoy_quarter_metrics input_symbol=%s yahoo_symbol=%s "
+                "api=yfinance quarterly_income_stmt|quarterly_financials",
+                symbol,
+                yahoo_symbol,
+            )
             ticker = yf.Ticker(yahoo_symbol)
             inc = getattr(ticker, "quarterly_income_stmt", None)
             if inc is None or not isinstance(inc, pd.DataFrame) or inc.empty or inc.shape[1] < 5:
@@ -365,11 +466,19 @@ class YahooDataFetcher:
             if not current or not yoy:
                 return empty
 
-            logger.info(f"YoY quarter metrics from Yahoo for {yahoo_symbol} (vs year-ago quarter)")
+            logger.info(
+                "data_fetch source=yahoo kind=yoy_quarter_metrics yahoo_symbol=%s result=ok",
+                yahoo_symbol,
+            )
             return current, yoy
 
         except Exception as e:
-            logger.warning(f"YoY quarter metrics unavailable for {symbol}: {e}")
+            logger.warning(
+                "data_fetch source=yahoo kind=yoy_quarter_metrics input_symbol=%s error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return empty
 
     def get_earnings_dates(self, symbol: str) -> pd.DataFrame:
@@ -388,14 +497,34 @@ class YahooDataFetcher:
         """
         try:
             yahoo_symbol = self.nse_to_yahoo_symbol(symbol)
+            logger.info(
+                "data_fetch source=yahoo kind=earnings_dates input_symbol=%s yahoo_symbol=%s "
+                "api=yfinance.Ticker.earnings_dates",
+                symbol,
+                yahoo_symbol,
+            )
             ticker = yf.Ticker(yahoo_symbol)
             earnings = ticker.earnings_dates
 
             if earnings is not None and not earnings.empty:
+                logger.info(
+                    "data_fetch source=yahoo kind=earnings_dates yahoo_symbol=%s result=ok rows=%d",
+                    yahoo_symbol,
+                    len(earnings),
+                )
                 return earnings
 
+            logger.info(
+                "data_fetch source=yahoo kind=earnings_dates yahoo_symbol=%s result=empty",
+                yahoo_symbol,
+            )
             return pd.DataFrame()
 
         except Exception as e:
-            logger.error(f"Error fetching earnings dates for {symbol}: {e}")
+            logger.error(
+                "data_fetch source=yahoo kind=earnings_dates input_symbol=%s error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return pd.DataFrame()

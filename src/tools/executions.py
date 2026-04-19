@@ -10,14 +10,15 @@ from typing import Any, Dict, List, Literal, Optional
 import pandas as pd
 
 from src.agent.announcements import get_latest_announcement_date
-from src.analysis.pead_analyzer import PEADAnalyzer
+from src.analysis.stock_analyzer import StockAnalyzer
 from src.technical.ai_verdict import generate_technical_verdict
+from src.technical.market_benchmark import aligned_market_index_close
 
 
 def resolve_earnings_date(
     symbol: str,
     announcement_date: Optional[str],
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
 ) -> pd.Timestamp:
     sym = symbol.strip().upper()
     if announcement_date:
@@ -30,14 +31,14 @@ def resolve_earnings_date(
     return pd.Timestamp(dt)
 
 
-def execute_fundamentals(analyzer: PEADAnalyzer, symbol: str) -> Dict[str, Any]:
+def execute_fundamentals(analyzer: StockAnalyzer, symbol: str) -> Dict[str, Any]:
     sym = symbol.strip().upper()
     bundle = analyzer.data_manager.get_company_fundamentals(sym)
     return analyzer.fundamental_analyzer.analyze(sym, bundle)
 
 
 def execute_technical(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     *,
     symbol: str,
     preloaded_ohlcv: Optional[pd.DataFrame] = None,
@@ -68,11 +69,14 @@ def execute_technical(
             "range_end": str(idx.max())[:10],
         }
         anchor = pd.Timestamp(idx[-1])
+        bench, bench_sym = aligned_market_index_close(analyzer.data_manager, stock_data)
         ta = analyzer.technical_analyzer.analyze(
             stock_data,
             anchor,
             symbol=sym,
             include_chart_payload=include_chart,
+            benchmark_close=bench,
+            benchmark_symbol=bench_sym,
         )
         out: Dict[str, Any] = {
             "success": True,
@@ -138,11 +142,14 @@ def execute_technical(
 
     idx = stock_data.index
     anchor = pd.Timestamp(idx[-1])
+    bench, bench_sym = aligned_market_index_close(analyzer.data_manager, stock_data)
     ta = analyzer.technical_analyzer.analyze(
         stock_data,
         anchor,
         symbol=sym,
         include_chart_payload=include_chart,
+        benchmark_close=bench,
+        benchmark_symbol=bench_sym,
     )
     out: Dict[str, Any] = {
         "success": True,
@@ -157,7 +164,7 @@ def execute_technical(
 
 
 def execute_scoring_only(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     symbol: str,
     announcement_date: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -170,7 +177,7 @@ def execute_scoring_only(
 
 
 def execute_trade_readiness_isolated(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     symbol: str,
     lookback_days: int = 200,
 ) -> Dict[str, Any]:
@@ -193,7 +200,7 @@ def execute_trade_readiness_isolated(
 
 
 def execute_execution_snapshot(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     symbol: str,
     lookback_days: int = 200,
 ) -> Dict[str, Any]:
@@ -208,7 +215,7 @@ def execute_execution_snapshot(
 
 
 def execute_document_pdf(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     symbol: str,
     announcement_date: str,
 ) -> Dict[str, Any]:
@@ -253,7 +260,7 @@ def execute_yahoo_calendar(symbol: str) -> Dict[str, Any]:
 
 
 def execute_recent_announcements(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     top_n: int,
     *,
     visualize: bool = False,

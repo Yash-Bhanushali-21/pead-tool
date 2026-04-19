@@ -46,6 +46,21 @@ Research / product backlog for the PEAD tool. Items are **not** commitments or t
 
 ---
 
+## 4. Zerodha as an optional OHLCV / candle data source
+
+**Problem:** Technical analysis quality depends on **clean, wide-coverage OHLCV** (and eventually intraday candles where the product supports them). NSE-site, Yahoo, and jugaad paths help for many names, but coverage, freshness, and **granularity** can still fall short for some symbols or windows—limiting indicators and chart fidelity over longer or more precise ranges.
+
+**Direction:**
+
+- Integrate **Zerodha (Kite Connect / official APIs)** as an **optional** `OHLCVSource`-style fetcher behind `DataManager`, with explicit **auth** (API key / token lifecycle) and **rate-limit** handling per Zerodha docs.
+- Map Zerodha instruments to NSE symbols; define **merge / fallback order** vs existing vendors (document who wins on duplicate timestamps).
+- Start with **daily** (or supported historical candles) aligned to the existing technical stack; extend to **finer intervals** only if the UI and pipeline agree on storage and chart semantics.
+- Log fetches with the same **`data_fetch`** style as other sources for ops visibility.
+
+**Status:** Not started — design auth + compliance (Kite T&Cs, user’s own brokerage account) before implementation.
+
+---
+
 ## How to use this file
 
 - Treat each item as a **ticket-sized epic**; break into PRs when picking up work.

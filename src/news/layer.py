@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
-from src.analysis.pead_analyzer import PEADAnalyzer
+from src.analysis.stock_analyzer import StockAnalyzer
 from src.config.config import CONFIG
 from src.news import NewsCollector, run_news_sentiment_pipeline
 from src.news.article_preview import build_article_preview_rows
@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_news_sentiment_layer(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     symbol: str,
     *,
     lookback_days: int = 90,

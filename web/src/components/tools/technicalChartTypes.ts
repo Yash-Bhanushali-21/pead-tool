@@ -20,8 +20,25 @@ export type TechnicalChartPayload = {
     bb_lower?: (number | null)[];
     stoch_k?: (number | null)[];
     stoch_d?: (number | null)[];
+    /** Anchored VWAP from first bar of window */
+    vwap?: (number | null)[];
+    supertrend?: (number | null)[];
+    keltner_upper?: (number | null)[];
+    keltner_lower?: (number | null)[];
+    adx?: (number | null)[];
+    plus_di?: (number | null)[];
+    minus_di?: (number | null)[];
   };
-  periods: { ma_short?: number; ma_long?: number; rsi: number; bb?: number; stoch_k?: number };
+  periods: {
+    ma_short?: number;
+    ma_long?: number;
+    rsi: number;
+    bb?: number;
+    stoch_k?: number;
+    adx?: number;
+    supertrend?: number;
+    cmf?: number;
+  };
   support_resistance: {
     support: { price: number; label: string }[];
     resistance: { price: number; label: string }[];

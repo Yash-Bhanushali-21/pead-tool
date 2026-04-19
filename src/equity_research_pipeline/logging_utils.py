@@ -6,6 +6,17 @@ import logging
 from typing import Any
 
 
+def format_equity_run_ctx(ctx: Any) -> str:
+    """
+    Stable key=value prefix for pipeline log lines (works without custom LogRecord fields).
+
+    Use with messages like: ``"equity_research.stage.foo %s ..." % format_equity_run_ctx(ctx)``.
+    """
+    rid = getattr(ctx, "run_id", "") or "?"
+    sym = getattr(ctx, "symbol", "") or "?"
+    return f"run_id={rid} symbol={sym}"
+
+
 def equity_research_log_adapter(
     base: logging.Logger,
     *,

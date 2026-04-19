@@ -34,7 +34,7 @@ from src.integrations.mem0_service import (
     mem0_runtime_enabled,
     resolve_mem0_user_id,
 )
-from src.analysis.pead_analyzer import PEADAnalyzer
+from src.analysis.stock_analyzer import StockAnalyzer
 from src.config.config import CONFIG, config
 from src.persistence.sqlite_chat import ChatStore, accumulate_stream_line
 from src.persistence.sqlite_news_articles import get_news_article_store
@@ -71,7 +71,7 @@ class ChatRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.pead_analyzer = PEADAnalyzer(use_cache=True)
+    app.state.stock_analyzer = StockAnalyzer(use_cache=True)
     store = ChatStore(CONFIG["CHAT_SQLITE_PATH"])
     store.init_schema()
     app.state.chat_store = store
@@ -120,7 +120,7 @@ async def chat_stream(body: ChatRequest, request: Request):
     out_base.mkdir(parents=True, exist_ok=True)
 
     deps = ResearchDeps(
-        analyzer=request.app.state.pead_analyzer,
+        analyzer=request.app.state.stock_analyzer,
         output_base=out_base,
     )
 
@@ -215,7 +215,7 @@ async def chat_complete(body: ChatRequest, request: Request):
 
     out_base = ROOT / "output" / config.AGENT_OUTPUT_SUBDIR
     out_base.mkdir(parents=True, exist_ok=True)
-    deps = ResearchDeps(analyzer=request.app.state.pead_analyzer, output_base=out_base)
+    deps = ResearchDeps(analyzer=request.app.state.stock_analyzer, output_base=out_base)
     synth = build_synthesis_agent(model=body.synthesis_model or config.AGENT_SYNTHESIS_MODEL)
     coord = build_coordinator_agent(
         synth, model=body.coordinator_model or config.AGENT_MODEL

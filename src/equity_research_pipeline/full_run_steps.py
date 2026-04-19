@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 import pandas as pd
 
 from src.config.config import config
+from src.equity_research_pipeline.logging_utils import format_equity_run_ctx
 from src.trade_context.trade_readiness import compute_trade_context
 
 if TYPE_CHECKING:
@@ -34,9 +35,8 @@ def stage_fetch_price_window(ctx: EquityResearchRunContext, an: EquityResearchAn
     ctx.results["price_fetch_calendar_start"] = a0.date().isoformat()
     ctx.results["price_fetch_calendar_end"] = a1.date().isoformat()
     logger.info(
-        "equity_research.fetch_price_window run=%s symbol=%s calendar_start=%s calendar_end=%s",
-        ctx.run_id,
-        ctx.symbol,
+        "equity_research.stage.fetch_price_window %s event=begin calendar_start=%s calendar_end=%s",
+        format_equity_run_ctx(ctx),
         ctx.results["price_fetch_calendar_start"],
         ctx.results["price_fetch_calendar_end"],
     )
@@ -47,7 +47,11 @@ def stage_fetch_price_window(ctx: EquityResearchRunContext, an: EquityResearchAn
             f"{ctx.results['price_fetch_calendar_end']}. NSE/Yahoo returned no usable daily prices; "
             "pipeline stopped before later stages."
         )
-        logger.error("equity_research.fetch_price_window: %s", msg)
+        logger.error(
+            "equity_research.stage.fetch_price_window %s event=error %s",
+            format_equity_run_ctx(ctx),
+            msg,
+        )
         raise ValueError(msg)
     # Clip to the requested **calendar** window so charts/tools never show bars outside UI range.
     cal_s = pd.Timestamp(a0.date()).normalize()
@@ -63,7 +67,11 @@ def stage_fetch_price_window(ctx: EquityResearchRunContext, an: EquityResearchAn
             f"No OHLCV rows for {ctx.symbol} after clipping to {cal_s.date()} .. {cal_e.date()} "
             "(vendor may have returned only dates outside this span)."
         )
-        logger.error("equity_research.fetch_price_window: %s", msg)
+        logger.error(
+            "equity_research.stage.fetch_price_window %s event=error %s",
+            format_equity_run_ctx(ctx),
+            msg,
+        )
         raise ValueError(msg)
     ctx.workspace["stock_data"] = stock_data
     ctx.results["data_points"] = int(len(stock_data))
@@ -72,10 +80,9 @@ def stage_fetch_price_window(ctx: EquityResearchRunContext, an: EquityResearchAn
     idx_min = pd.Timestamp(idx.min()).isoformat()
     idx_max = pd.Timestamp(idx.max()).isoformat()
     logger.info(
-        "equity_research.fetch_price_window run=%s symbol=%s rows=%d ohlcv_index_min=%s "
+        "equity_research.stage.fetch_price_window %s event=done rows=%d ohlcv_index_min=%s "
         "ohlcv_index_max=%s",
-        ctx.run_id,
-        ctx.symbol,
+        format_equity_run_ctx(ctx),
         len(stock_data),
         idx_min,
         idx_max,
@@ -85,9 +92,18 @@ def stage_fetch_price_window(ctx: EquityResearchRunContext, an: EquityResearchAn
 def stage_resolve_output_dir(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
     opts = ctx.options
     if not opts.output_dir:
+        logger.info(
+            "equity_research.stage.resolve_output_dir %s event=skip reason=no_output_dir_configured",
+            format_equity_run_ctx(ctx),
+        )
         return
     from src.utils.run_output import resolve_run_output_directory
 
+    logger.info(
+        "equity_research.stage.resolve_output_dir %s event=begin output_dir_template=%s",
+        format_equity_run_ctx(ctx),
+        opts.output_dir,
+    )
     stock_data: pd.DataFrame = ctx.workspace["stock_data"]
     resolved_out = resolve_run_output_directory(
         opts.output_dir,
@@ -99,14 +115,28 @@ def stage_resolve_output_dir(ctx: EquityResearchRunContext, an: EquityResearchAn
     resolved_out.mkdir(parents=True, exist_ok=True)
     out = str(resolved_out)
     ctx.results["output_dir"] = out
-    logger.info("Run output directory: %s", out)
+    logger.info(
+        "equity_research.stage.resolve_output_dir %s event=done resolved_path=%s",
+        format_equity_run_ctx(ctx),
+        out,
+    )
 
 
 def stage_run_fundamentals_tool(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
     from src.tools.executions import execute_fundamentals
 
+    logger.info(
+        "equity_research.stage.run_fundamentals_tool %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     fa = execute_fundamentals(an, ctx.symbol)
     ctx.results["fundamental_analysis"] = fa
+    stance = fa.get("stance") if isinstance(fa, dict) else None
+    logger.info(
+        "equity_research.stage.run_fundamentals_tool %s event=done stance=%s",
+        format_equity_run_ctx(ctx),
+        stance,
+    )
     output_dir = ctx.results.get("output_dir")
     if not output_dir:
         return
@@ -130,9 +160,21 @@ def stage_run_technical_tool(ctx: EquityResearchRunContext, an: EquityResearchAn
     o = ctx.options
     sd = ctx.workspace.get("stock_data")
     if not isinstance(sd, pd.DataFrame) or sd.empty:
+        logger.warning(
+            "equity_research.stage.run_technical_tool %s event=skip reason=missing_or_empty_ohlcv_workspace",
+            format_equity_run_ctx(ctx),
+        )
         ctx.results["technical_tool_response"] = {"success": False, "error": "Missing OHLCV workspace"}
         ctx.results["technical_analysis"] = {}
         return
+    logger.info(
+        "equity_research.stage.run_technical_tool %s event=begin rows=%d include_chart=%s "
+        "include_ai_verdict=%s",
+        format_equity_run_ctx(ctx),
+        len(sd),
+        o.technical_include_chart,
+        o.technical_include_ai_verdict,
+    )
     resp = execute_technical(
         an,
         symbol=ctx.symbol,
@@ -146,6 +188,16 @@ def stage_run_technical_tool(ctx: EquityResearchRunContext, an: EquityResearchAn
     else:
         ctx.results["technical_analysis"] = {}
         ctx.results["technical_tool_error"] = resp.get("error")
+        logger.warning(
+            "equity_research.stage.run_technical_tool %s event=tool_error error=%s",
+            format_equity_run_ctx(ctx),
+            resp.get("error"),
+        )
+    if resp.get("success"):
+        logger.info(
+            "equity_research.stage.run_technical_tool %s event=done success=true",
+            format_equity_run_ctx(ctx),
+        )
     output_dir = ctx.results.get("output_dir")
     if output_dir and resp.get("success"):
         outp = Path(output_dir)
@@ -155,12 +207,24 @@ def stage_run_technical_tool(ctx: EquityResearchRunContext, an: EquityResearchAn
 
 def stage_run_news_tool(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
     if not ctx.options.include_news:
+        logger.info(
+            "equity_research.stage.run_news_tool %s event=skip reason=include_news_false",
+            format_equity_run_ctx(ctx),
+        )
         ctx.results["news_sentiment"] = None
         return
     from src.news.layer import run_news_sentiment_layer
 
     o = ctx.options
     mx = o.news_max_articles if o.news_max_articles is not None else config.NEWS_MAX_ARTICLES
+    logger.info(
+        "equity_research.stage.run_news_tool %s event=begin lookback_days=%s max_articles=%s "
+        "scrape_bodies=%s",
+        format_equity_run_ctx(ctx),
+        int(config.NEWS_LOOKBACK_DAYS),
+        int(mx),
+        o.news_scrape_bodies,
+    )
     layer_out = run_news_sentiment_layer(
         an,
         ctx.symbol,
@@ -174,6 +238,16 @@ def stage_run_news_tool(ctx: EquityResearchRunContext, an: EquityResearchAnalyze
     )
     ctx.results["news_tool_response"] = layer_out
     ctx.results["news_sentiment"] = layer_out.get("news_sentiment") if isinstance(layer_out, dict) else None
+    prev_n = 0
+    if isinstance(layer_out, dict):
+        ap = layer_out.get("articles_preview")
+        if isinstance(ap, list):
+            prev_n = len(ap)
+    logger.info(
+        "equity_research.stage.run_news_tool %s event=done articles_preview_count=%s",
+        format_equity_run_ctx(ctx),
+        prev_n,
+    )
     output_dir = ctx.results.get("output_dir")
     if output_dir:
         outp = Path(output_dir)
@@ -187,11 +261,20 @@ def stage_run_news_tool(ctx: EquityResearchRunContext, an: EquityResearchAnalyze
 
 def stage_run_market_sentiment_tool(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
     if not ctx.options.include_market_sentiment:
+        logger.info(
+            "equity_research.stage.run_market_sentiment_tool %s event=skip "
+            "reason=include_market_sentiment_false",
+            format_equity_run_ctx(ctx),
+        )
         ctx.results["market_sentiment"] = None
         ctx.results["market_tool_response"] = None
         return
     from src.news.market_sentiment_layer import run_market_sentiment_layer
 
+    logger.info(
+        "equity_research.stage.run_market_sentiment_tool %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     bundle = an.data_manager.get_company_fundamentals(ctx.symbol)
     company_name = str(bundle.get("company_name") or ctx.symbol).strip()
     mx = int(ctx.options.market_sentiment_max_articles)
@@ -211,6 +294,18 @@ def stage_run_market_sentiment_tool(ctx: EquityResearchRunContext, an: EquityRes
     ctx.results["market_sentiment"] = (
         layer_out.get("market_sentiment") if isinstance(layer_out, dict) else None
     )
+    mprev = 0
+    if isinstance(layer_out, dict):
+        ap = layer_out.get("articles_preview")
+        if isinstance(ap, list):
+            mprev = len(ap)
+    logger.info(
+        "equity_research.stage.run_market_sentiment_tool %s event=done company_name=%s "
+        "articles_preview_count=%s",
+        format_equity_run_ctx(ctx),
+        company_name,
+        mprev,
+    )
     output_dir = ctx.results.get("output_dir")
     if output_dir:
         outp = Path(output_dir)
@@ -223,6 +318,10 @@ def stage_run_market_sentiment_tool(ctx: EquityResearchRunContext, an: EquityRes
 
 
 def stage_run_trade_context(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
+    logger.info(
+        "equity_research.stage.run_trade_context %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     stock_data: pd.DataFrame = ctx.workspace["stock_data"]
     probe: Dict[str, Any] = {
         "fundamental_analysis": ctx.results.get("fundamental_analysis") or {},
@@ -234,14 +333,30 @@ def stage_run_trade_context(ctx: EquityResearchRunContext, an: EquityResearchAna
     }
     try:
         ctx.results["trade_context"] = compute_trade_context(probe, stock_data)
+        tc = ctx.results.get("trade_context")
+        score = tc.get("trade_readiness_score_0_100") if isinstance(tc, dict) else None
+        logger.info(
+            "equity_research.stage.run_trade_context %s event=done trade_readiness_score_0_100=%s",
+            format_equity_run_ctx(ctx),
+            score,
+        )
     except Exception as e:
-        logger.warning("Trade context failed: %s", e)
+        logger.warning(
+            "equity_research.stage.run_trade_context %s event=error err=%s",
+            format_equity_run_ctx(ctx),
+            e,
+            exc_info=True,
+        )
         ctx.results["trade_context"] = {"error": str(e), "trade_readiness_score_0_100": None}
 
 
 def stage_run_research_desk(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
     """Single LLM pass over the consolidated bundle (does not fail the pipeline on model errors)."""
     if not ctx.options.include_desk_insight:
+        logger.info(
+            "equity_research.stage.run_research_desk %s event=skip reason=include_desk_insight_false",
+            format_equity_run_ctx(ctx),
+        )
         ctx.results["research_desk"] = {
             "skipped": True,
             "reason": "Research desk insight disabled for this run.",
@@ -252,14 +367,48 @@ def stage_run_research_desk(ctx: EquityResearchRunContext, an: EquityResearchAna
         run_equity_desk_insight,
     )
 
+    logger.info(
+        "equity_research.stage.run_research_desk %s event=begin",
+        format_equity_run_ctx(ctx),
+    )
     try:
         bundle = build_equity_research_bundle(ctx)
         ctx.results["research_desk"] = run_equity_desk_insight(bundle)
     except Exception as e:
-        logger.warning("Research desk stage failed: %s", e)
+        logger.exception(
+            "equity_research.stage.run_research_desk %s event=bundle_or_desk_raised",
+            format_equity_run_ctx(ctx),
+        )
         ctx.results["research_desk"] = {"error": str(e)}
 
     out = ctx.results.get("research_desk")
+    if isinstance(out, dict):
+        if out.get("skipped"):
+            logger.info(
+                "equity_research.stage.run_research_desk %s event=summary skipped=true reason=%s",
+                format_equity_run_ctx(ctx),
+                str(out.get("reason") or "")[:240],
+            )
+        elif isinstance(out.get("markdown"), str) and out["markdown"].strip():
+            logger.info(
+                "equity_research.stage.run_research_desk %s event=summary markdown_chars=%s model=%s",
+                format_equity_run_ctx(ctx),
+                len(out["markdown"]),
+                out.get("model"),
+            )
+        elif out.get("error"):
+            logger.info(
+                "equity_research.stage.run_research_desk %s event=summary result=error message=%s",
+                format_equity_run_ctx(ctx),
+                str(out.get("error"))[:500],
+            )
+        else:
+            logger.info(
+                "equity_research.stage.run_research_desk %s event=summary payload_keys=%s",
+                format_equity_run_ctx(ctx),
+                list(out.keys()),
+            )
+
     output_dir = ctx.results.get("output_dir")
     if (
         output_dir
@@ -268,11 +417,25 @@ def stage_run_research_desk(ctx: EquityResearchRunContext, an: EquityResearchAna
         and out["markdown"].strip()
     ):
         outp = Path(output_dir)
-        outp.mkdir(parents=True, exist_ok=True)
-        (outp / f"{ctx.symbol}_research_desk.md").write_text(
-            out["markdown"],
-            encoding="utf-8",
-        )
+        try:
+            outp.mkdir(parents=True, exist_ok=True)
+            desk_path = outp / f"{ctx.symbol}_research_desk.md"
+            desk_path.write_text(
+                out["markdown"],
+                encoding="utf-8",
+            )
+            logger.info(
+                "equity_research.stage.run_research_desk %s event=artifact_written path=%s",
+                format_equity_run_ctx(ctx),
+                desk_path,
+            )
+        except OSError as e:
+            logger.warning(
+                "equity_research.stage.run_research_desk %s event=artifact_write_failed err=%s",
+                format_equity_run_ctx(ctx),
+                e,
+                exc_info=True,
+            )
 
 
 EQUITY_RESEARCH_FULL_STAGES: List[Tuple[str, Any]] = [

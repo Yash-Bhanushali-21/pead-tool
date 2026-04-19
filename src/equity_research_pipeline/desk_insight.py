@@ -128,9 +128,11 @@ def run_equity_desk_insight(bundle: Dict[str, Any]) -> Dict[str, Any]:
     """
     api_key = CONFIG.get("OPENAI_API_KEY")
     if not api_key:
+        logger.info("equity_desk.skip reason=no_openai_api_key")
         return {"skipped": True, "reason": "OPENAI_API_KEY is not set on the server."}
 
     model = CONFIG.get("OPENAI_EQUITY_DESK_MODEL") or config.OPENAI_TECH_VERDICT_MODEL
+    logger.info("equity_desk.llm_request model=%s", model)
     user = (
         "Equity research bundle (JSON). Ground every statement in this object; cite gaps explicitly.\n\n"
         f"```json\n{json.dumps(bundle, indent=2, default=str)[:28000]}\n```"
@@ -151,8 +153,9 @@ def run_equity_desk_insight(bundle: Dict[str, Any]) -> Dict[str, Any]:
         )
         text = (resp.choices[0].message.content or "").strip()
         if not text:
+            logger.warning("equity_desk.llm_empty_response model=%s", model)
             return {"error": "Empty model response."}
         return {"markdown": text, "model": model}
     except Exception as e:
-        logger.warning("Equity desk insight LLM failed: %s", e)
+        logger.warning("equity_desk.llm_request_failed model=%s err=%s", model, e, exc_info=True)
         return {"error": str(e)}

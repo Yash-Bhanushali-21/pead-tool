@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from src.agent.serialize import compact_pead_for_llm
-from src.analysis.pead_analyzer import PEADAnalyzer
+from src.analysis.stock_analyzer import StockAnalyzer
 from src.config.config import CONFIG, config
 from src.news.layer import run_news_sentiment_layer
 from src.equity_research_pipeline.full_run_steps import EQUITY_PIPELINE_STAGE_IDS
@@ -120,6 +120,10 @@ class PeadSingleRequest(BaseModel):
         True,
         description="When False, skips the final OpenAI ai_digest for the market-context pass.",
     )
+    technical_include_ai_verdict: bool = Field(
+        False,
+        description="When True, after technicals, request OpenAI commentary on the snapshot (next-session entry/exit discussion; not advice). Requires OPENAI_API_KEY.",
+    )
     output_dir: str = Field(default_factory=lambda: str(ROOT / "output"))
     pipeline_stages: Optional[List[str]] = Field(
         None,
@@ -171,8 +175,8 @@ class PeadRecentRequest(BaseModel):
     output_dir: str = Field(default_factory=lambda: str(ROOT / "output"))
 
 
-def _analyzer(use_cache: bool) -> PEADAnalyzer:
-    return PEADAnalyzer(use_cache=use_cache)
+def _analyzer(use_cache: bool) -> StockAnalyzer:
+    return StockAnalyzer(use_cache=use_cache)
 
 
 def _single_inclusive_range(body: PeadSingleRequest) -> tuple[datetime, datetime]:
@@ -206,6 +210,7 @@ async def run_single(body: PeadSingleRequest) -> dict[str, Any]:
             market_sentiment_max_articles=body.market_sentiment_max_articles,
             include_symbol_news_ai_digest=body.include_symbol_news_ai_digest,
             include_market_news_ai_digest=body.include_market_news_ai_digest,
+            technical_include_ai_verdict=body.technical_include_ai_verdict,
             pipeline_stages=tuple(body.pipeline_stages) if body.pipeline_stages else None,
         )
 

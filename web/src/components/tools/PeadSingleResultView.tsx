@@ -187,7 +187,7 @@ export function TechnicalSection({
           max={100}
         />
       </div>
-      <div className="grid gap-2 text-xs text-slate-400 sm:grid-cols-3">
+      <div className="grid gap-2 text-xs text-slate-400 sm:grid-cols-2 lg:grid-cols-4">
         <div>
           <span className="text-slate-500">Trend</span>{" "}
           <span className="text-slate-300">{String(labels.trend ?? "—")}</span>
@@ -200,6 +200,10 @@ export function TechnicalSection({
           <span className="text-slate-500">Volatility</span>{" "}
           <span className="text-slate-300">{String(labels.volatility ?? "—")}</span>
         </div>
+        <div>
+          <span className="text-slate-500">Regime (ADX)</span>{" "}
+          <span className="text-slate-300">{String(labels.trend_regime ?? "—")}</span>
+        </div>
       </div>
       <MetricGrid
         items={[
@@ -211,6 +215,61 @@ export function TechnicalSection({
           { label: "Sessions", value: String(ta.sessions_in_sample ?? "—") },
         ]}
       />
+      {isRecord(last.advanced) ? (
+        <div className="space-y-2 border-t border-surface-border pt-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Advanced indicators
+          </p>
+          <MetricGrid
+            items={(() => {
+              const adv = last.advanced as Record<string, unknown>;
+              const rows: { label: string; value: string }[] = [
+                { label: "ADX", value: numFmt(adv.adx, 2) },
+                { label: "+DI / −DI", value: `${numFmt(adv.plus_di, 2)} / ${numFmt(adv.minus_di, 2)}` },
+                {
+                  label: "Supertrend (dir)",
+                  value: `${numFmt(adv.supertrend, 4)} (${
+                    adv.supertrend_direction === 1
+                      ? "bull"
+                      : adv.supertrend_direction === -1
+                        ? "bear"
+                        : "—"
+                  })`,
+                },
+                { label: "Anchored VWAP", value: numFmt(adv.anchored_vwap, 4) },
+                { label: "CMF", value: numFmt(adv.cmf, 4) },
+                { label: "OBV Δ10", value: numFmt(adv.obv_change_10, 2) },
+                { label: "BB width %", value: numFmt(adv.bb_bandwidth_pct, 2) },
+                { label: "HV ann. %", value: numFmt(adv.hv_annualized_pct, 2) },
+                {
+                  label: "Squeeze",
+                  value: adv.squeeze_on === true ? "On (BB inside KC)" : "Off",
+                },
+                {
+                  label: "5-bar swing",
+                  value: [
+                    adv.local_high_last ? "local high" : null,
+                    adv.local_low_last ? "local low" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "—",
+                },
+              ];
+              const vb = adv.vs_benchmark;
+              if (isRecord(vb) && typeof vb.benchmark_symbol === "string") {
+                rows.push({
+                  label: `vs ${vb.benchmark_symbol}`,
+                  value:
+                    typeof vb.rs_ratio_times_100 === "number"
+                      ? `RS ${numFmt(vb.rs_ratio_times_100, 4)} · Δ${numFmt(vb.rs_ratio_change_lookback_pct, 2)}%`
+                      : String(vb.error ?? "—"),
+                });
+              }
+              return rows;
+            })()}
+          />
+        </div>
+      ) : null}
       {notes.length > 0 && (
         <ul className="list-inside list-disc text-xs text-slate-500">
           {notes.map((n, i) => (
@@ -653,6 +712,72 @@ function MarketSentimentSection({
   );
 }
 
+function TechnicalAiVerdictSection({
+  requested,
+  verdict,
+}: {
+  requested: boolean | undefined;
+  verdict: unknown;
+}) {
+  if (requested === false) {
+    return (
+      <p className="text-sm text-slate-500">
+        Technical AI commentary was not requested for this run (toggle off). Raw indicators and scores
+        are still in Technical analysis above.
+      </p>
+    );
+  }
+  if (requested !== true) {
+    return (
+      <p className="text-sm text-slate-500">
+        No technical AI commentary flag on this payload (older API or technical stage skipped).
+      </p>
+    );
+  }
+  if (!isRecord(verdict)) {
+    return (
+      <p className="text-sm text-slate-500">
+        No technical commentary block returned (technical step may have failed or produced no verdict).
+      </p>
+    );
+  }
+  if (verdict.skipped === true) {
+    return (
+      <p className="rounded-lg border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-sm text-amber-100/90">
+        Technical commentary skipped:{" "}
+        {typeof verdict.reason === "string" ? verdict.reason : "unavailable."}
+      </p>
+    );
+  }
+  if (typeof verdict.error === "string") {
+    return (
+      <p className="rounded-lg border border-rose-900/40 bg-rose-950/20 px-3 py-2 text-sm text-rose-100/90">
+        Technical commentary error: {verdict.error}
+      </p>
+    );
+  }
+  const text = typeof verdict.text === "string" ? verdict.text.trim() : "";
+  if (!text) {
+    return <p className="text-sm text-slate-500">No commentary text returned.</p>;
+  }
+  return (
+    <div className="space-y-2 text-sm">
+      {typeof verdict.model === "string" && (
+        <p className="text-xs text-slate-500">
+          Model: <span className="font-mono text-slate-400">{verdict.model}</span>
+        </p>
+      )}
+      <div className="prose prose-invert prose-sm prose-headings:scroll-mt-20 max-w-none prose-p:text-slate-300 prose-li:text-slate-300 prose-headings:text-slate-200">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      </div>
+      <p className="text-xs text-slate-500">
+        Model-generated plan from the technical snapshot—confirm levels against live quotes; overnight news
+        and fundamentals can override the read.
+      </p>
+    </div>
+  );
+}
+
 function ResearchDeskSection({ desk }: { desk: unknown }) {
   if (!isRecord(desk)) {
     return <p className="text-sm text-slate-500">No research desk payload.</p>;
@@ -891,6 +1016,12 @@ export function PeadSingleResultView({ payload }: { payload: unknown }) {
 
       <CollapsibleToolSection title="Technical analysis" defaultOpen>
         <TechnicalSection ta={ta} toolError={toolError} toolMeta={ttr} />
+      </CollapsibleToolSection>
+      <CollapsibleToolSection title="Technical trade plan (AI)" defaultOpen>
+        <TechnicalAiVerdictSection
+          requested={inner.technical_include_ai_verdict as boolean | undefined}
+          verdict={ttr && isRecord(ttr) ? ttr.research_verdict : undefined}
+        />
       </CollapsibleToolSection>
       <CollapsibleToolSection title="Fundamental analysis (screening)" defaultOpen>
         <FundamentalSection fa={fa} />

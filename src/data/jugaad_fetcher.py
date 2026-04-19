@@ -105,6 +105,8 @@ def _normalize_jugaad_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
 class JugaadDataFetcher:
     """Fetch NSE equity history when other paths fail (optional dependency)."""
 
+    SOURCE_ID = "jugaad"
+
     def __init__(self, series: str = "EQ") -> None:
         self.series = series
 
@@ -136,20 +138,51 @@ class JugaadDataFetcher:
             return None
 
         try:
-            logger.info("Fetching %s from jugaad-data (NSE) %s .. %s", sym, fd, td)
+            logger.info(
+                "data_fetch source=jugaad kind=equity_ohlcv input_symbol=%s nse_symbol=%s series=%s "
+                "api=jugaad_data.nse.stock_df from_date=%s to_date=%s",
+                symbol,
+                sym,
+                self.series,
+                fd,
+                td,
+            )
             raw = stock_df(symbol=sym, from_date=fd, to_date=td, series=self.series)
         except Exception as e:
-            logger.warning("jugaad-data fetch failed for %s: %s", sym, e)
+            logger.warning(
+                "data_fetch source=jugaad kind=equity_ohlcv nse_symbol=%s error=%s",
+                sym,
+                e,
+                exc_info=True,
+            )
             return None
 
         if raw is None or raw.empty:
-            logger.warning("jugaad-data returned no rows for %s", sym)
+            logger.warning(
+                "data_fetch source=jugaad kind=equity_ohlcv nse_symbol=%s result=empty raw_rows=0 "
+                "from_date=%s to_date=%s",
+                sym,
+                fd,
+                td,
+            )
             return None
 
         df = _normalize_jugaad_ohlcv(raw)
         if df is None or df.empty:
-            logger.warning("jugaad-data normalization produced empty frame for %s", sym)
+            logger.warning(
+                "data_fetch source=jugaad kind=equity_ohlcv nse_symbol=%s result=invalid "
+                "reason=normalize_empty",
+                sym,
+            )
             return None
 
-        logger.info("Fetched %d rows from jugaad-data for %s", len(df), sym)
+        idx = df.index
+        logger.info(
+            "data_fetch source=jugaad kind=equity_ohlcv nse_symbol=%s result=ok rows=%d "
+            "bar_first=%s bar_last=%s",
+            sym,
+            len(df),
+            pd.Timestamp(idx.min()).date().isoformat() if len(idx) else None,
+            pd.Timestamp(idx.max()).date().isoformat() if len(idx) else None,
+        )
         return df

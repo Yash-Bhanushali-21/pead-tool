@@ -1,7 +1,7 @@
 """
 Data Manager
-Unified interface that manages NSE and Yahoo Finance data sources
-Implements fallback logic and data caching
+Unified façade over pluggable :class:`~src.data.ohlcv_source.OHLCVSource` implementations
+(NSE → Yahoo → jugaad for stock OHLCV), with merge rules and caching.
 """
 import pandas as pd
 import numpy as np
@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 from src.data.nse_fetcher import NSEDataFetcher
+from src.data.ohlcv_source import OHLCVSource
 from src.data.yahoo_fetcher import YahooDataFetcher
 from src.data.jugaad_fetcher import JugaadDataFetcher
 from src.config.config import config
@@ -24,10 +25,18 @@ logger = logging.getLogger(__name__)
 _STOCK_OHLCV_CACHE_PREFIX = "stock_ohlcv_merged_v2"
 _MARKET_OHLCV_CACHE_PREFIX = "market_ohlcv_merged_v2"
 
+# When multiple OHLCV frames are merged, duplicate calendar days keep the **last** argument to
+# ``_merge_ohlcv_priority`` (highest priority last). Current call order: Yahoo → Jugaad → NSE.
+_OHLCV_MERGE_ORDER_STOCK = ("yahoo", "jugaad", "nse")
+
 
 class DataManager:
     """
     Unified data manager: NSE (nsepython) → Yahoo (yfinance) → optional jugaad-data (NSE site).
+
+    Stock OHLCV sources implement :class:`~src.data.ohlcv_source.OHLCVSource`; see
+    ``self.ohlcv_sources`` for the registered list. Merge priority for overlapping days:
+    last in ``_OHLCV_MERGE_ORDER_STOCK`` wins (NSE overwrites earlier vendors).
 
     See :class:`~src.data.yahoo_fetcher.YahooDataFetcher` and :class:`~src.data.jugaad_fetcher.JugaadDataFetcher`.
     """
@@ -44,6 +53,12 @@ class DataManager:
         self.nse_fetcher = NSEDataFetcher()
         self.yahoo_fetcher = YahooDataFetcher()
         self.jugaad_fetcher = JugaadDataFetcher()
+        #: Registered stock OHLCV backends (id, source) — add new vendors here after implementing ``OHLCVSource``.
+        self.ohlcv_sources: tuple[tuple[str, OHLCVSource], ...] = (
+            (self.nse_fetcher.SOURCE_ID, self.nse_fetcher),
+            (self.yahoo_fetcher.SOURCE_ID, self.yahoo_fetcher),
+            (self.jugaad_fetcher.SOURCE_ID, self.jugaad_fetcher),
+        )
         self.use_cache = use_cache
         self.cache_dir = Path(config.CACHE_DIR)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -268,9 +283,23 @@ class DataManager:
         # Try cache
         cached = self._load_from_cache(cache_key)
         if cached is not None:
+            logger.info(
+                "data_manager.get_stock_data cache=hit symbol=%s calendar_start=%s calendar_end=%s "
+                "rows=%d",
+                symbol,
+                to_calendar_date(start_date),
+                to_calendar_date(end_date),
+                len(cached.index),
+            )
             return cached
 
-        logger.info("Fetching %s from NSE (calendar %s .. %s)", symbol, start_date.date(), end_date.date())
+        logger.info(
+            "data_manager.get_stock_data cache=miss symbol=%s calendar_start=%s calendar_end=%s "
+            "flow=nse_then_conditional_yahoo_jugaad",
+            symbol,
+            to_calendar_date(start_date),
+            to_calendar_date(end_date),
+        )
         nse_df = self.nse_fetcher.get_stock_data(symbol, start_date, end_date)
 
         yahoo_df: Optional[pd.DataFrame] = None
@@ -280,13 +309,20 @@ class DataManager:
         if miss_nse and fallback_to_yahoo:
             if nse_df is not None and not nse_df.empty:
                 logger.info(
-                    "NSE OHLCV for %s starts at %s (requested from %s); pulling Yahoo for full-window backfill",
+                    "data_manager.get_stock_data fallback=yahoo reason=nse_starts_late symbol=%s "
+                    "nse_first_bar=%s requested_start=%s",
                     symbol,
                     to_calendar_date(nse_df.index.min()),
                     to_calendar_date(start_date),
                 )
             else:
-                logger.info("NSE returned no rows for %s; trying Yahoo", symbol)
+                logger.info(
+                    "data_manager.get_stock_data fallback=yahoo reason=nse_empty symbol=%s "
+                    "calendar_start=%s calendar_end=%s",
+                    symbol,
+                    to_calendar_date(start_date),
+                    to_calendar_date(end_date),
+                )
             yahoo_df = self.yahoo_fetcher.get_stock_data(symbol, start_date, end_date)
 
         # jugaad-data (NSE site): use when NSE is short on history *and* Yahoo did not deliver an
@@ -297,9 +333,11 @@ class DataManager:
             )
             if yahoo_still_short:
                 logger.info(
-                    "NSE truncated or empty and Yahoo still lacks window start for %s; "
-                    "fetching jugaad-data (NSE site) for the same calendar span",
+                    "data_manager.get_stock_data fallback=jugaad reason=yahoo_still_short_or_empty "
+                    "symbol=%s calendar_start=%s calendar_end=%s",
                     symbol,
+                    to_calendar_date(start_date),
+                    to_calendar_date(end_date),
                 )
                 jugaad_df = self.jugaad_fetcher.get_stock_data(symbol, start_date, end_date)
 
@@ -315,6 +353,7 @@ class DataManager:
                 end_date,
             )
         else:
+            # Order must match _OHLCV_MERGE_ORDER_STOCK (last wins on duplicate index).
             data = self._merge_ohlcv_priority(yahoo_df, jugaad_df, nse_df)
             data = self._clip_ohlcv_calendar_window(data, start_date, end_date)
 
@@ -363,21 +402,43 @@ class DataManager:
         # Try cache
         cached = self._load_from_cache(cache_key)
         if cached is not None:
+            logger.info(
+                "data_manager.get_market_data cache=hit market_index_yahoo=%s calendar_start=%s "
+                "calendar_end=%s rows=%d",
+                config.MARKET_INDEX,
+                to_calendar_date(start_date),
+                to_calendar_date(end_date),
+                len(cached.index),
+            )
             return cached
 
-        logger.info("Fetching market index from NSE")
+        logger.info(
+            "data_manager.get_market_data cache=miss nse_index_name=NIFTY 50 yahoo_index=%s "
+            "calendar_start=%s calendar_end=%s flow=nse_then_yahoo_if_short",
+            config.MARKET_INDEX,
+            to_calendar_date(start_date),
+            to_calendar_date(end_date),
+        )
         nse_idx = self.nse_fetcher.get_index_data("NIFTY 50", start_date, end_date)
 
         yahoo_idx: Optional[pd.DataFrame] = None
         if self._ohlcv_missing_request_start(nse_idx, start_date):
             if nse_idx is not None and not nse_idx.empty:
                 logger.info(
-                    "NSE index series starts at %s (requested from %s); pulling Yahoo backfill",
+                    "data_manager.get_market_data fallback=yahoo reason=nse_index_starts_late "
+                    "nse_first_bar=%s requested_start=%s yahoo_index=%s",
                     to_calendar_date(nse_idx.index.min()),
                     to_calendar_date(start_date),
+                    config.MARKET_INDEX,
                 )
             else:
-                logger.info("NSE index empty; trying Yahoo for market index")
+                logger.info(
+                    "data_manager.get_market_data fallback=yahoo reason=nse_index_empty "
+                    "yahoo_index=%s calendar_start=%s calendar_end=%s",
+                    config.MARKET_INDEX,
+                    to_calendar_date(start_date),
+                    to_calendar_date(end_date),
+                )
             yahoo_idx = self.yahoo_fetcher.get_index_data(config.MARKET_INDEX, start_date, end_date)
 
         if (

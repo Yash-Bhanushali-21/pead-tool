@@ -5,6 +5,8 @@
 > **Living context:** Read all **`memory-bank/*.md`** at task start (Cursor rule `memory-bank.mdc`). Dated **change log** and README snapshot source: [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md).
 > - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
 > - **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance; optional final OpenAI **`ai_digest`** (toggle per run on equity single + `/api/tools/run/news` + agent tool). **`articles_preview`** uses dated-then-undated ordering so HTML discovery / undated rows are not dropped under tight preview caps; citations rows carry **`collector_source`** / **`body_scrape_present`** in metadata.
+> - **Data / OHLCV:** **`DataManager`** composes NSE, Yahoo, and optional **jugaad-data** behind **`OHLCVSource`**; exports `DataManager`, `OHLCVSource` from `src/data/__init__.py`. Vendor ops log with **`data_fetch`** / **`data_manager.*`** (symbol, window, cache hit/miss, fallback reasons). Market benchmark / relative strength uses **`get_market_data`** + Yahoo index history for **`MARKET_INDEX`** (e.g. **`^NSEI`**), not the equity stock Yahoo suffix path for indices.
+> - **Observability:** Equity research and scoring pipelines log stage boundaries and timings (`equity_research.pipeline`, per-stage `equity_research.stage.*`, `scoring_pipeline.stage.*`) with **`run_id`** / **`symbol`**; research desk LLM calls log model and errors with tracebacks when applicable.
 > - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
 > - **Entry:** CLI `main.py` (PEAD modes: recent / single / batch); dev **`./scripts/dev.sh`** (venv-aware `uvicorn` + `web/` Vite) or repo-root **`npm run dev`** (concurrently: API + Vite); UI **`/`** (chat) and **`/tools`** (unified equity-research tool; legacy `/tools/*` paths redirect here).
 > - **Config:** `src/config/config.py` / `src/config/settings.py`, `.env` via `python-dotenv`; **`OPENAI_API_KEY`** required for **chat** and any tool path that calls OpenAI (e.g. news LLM / `ai_digest`, research desk, optional technical verdict). Plain data-only tool calls can run without it.
@@ -33,7 +35,7 @@ This repository is a **research stack** for **NSE-listed** names: classic **PEAD
 | **News** | Headline collection, optional **trafilatura** body scrape, TextBlob + optional OpenAI headline blend, optional final **`ai_digest`**; SQLite **citations** (`GET /api/news/articles`) |
 | **API** | FastAPI: **`/api/tools/*`**, **`/api/chat/stream`**, health, chat sessions — see [API & web](#api--web) |
 | **Web** | Vite + React + Tailwind: **`/`** chat, **`/tools`** unified equity research (legacy `/tools/news` etc. redirect here) |
-| **Agent** | PydanticAI coordinator + tools calling `PEADAnalyzer` and news/fundamentals/technical helpers (`src/agent/`) |
+| **Agent** | PydanticAI coordinator + tools calling `StockAnalyzer` and news/fundamentals/technical helpers (`src/agent/`) |
 
 ## Quick start
 
@@ -73,7 +75,7 @@ Open **`http://localhost:5173`**. Only the UI port is for humans in dev; the API
 
 ### Chat (PydanticAI + Mem0)
 
-- **Coordinator** streams replies and calls tools (`PEADAnalyzer`, news, calendar, etc.).
+- **Coordinator** streams replies and calls tools (`StockAnalyzer`, news, calendar, etc.).
 - **Research desk** (when enabled) adds consolidated narrative — requires `OPENAI_API_KEY`.
 
 **Optional Mem0:** `MEM0_ENABLED=true` after `pip install` (see `requirements.txt`). Scope by chat `session_id` or `mem0_user_id` / `MEM0_DEFAULT_USER_ID`. Per request: `use_mem0: false`. **`GET /api/health`** exposes `mem0_enabled` / `mem0_runtime`.
@@ -136,7 +138,7 @@ pead-tool/
 ├── web/                         # Vite + React (Chat + /tools)
 ├── scripts/dev.sh               # API + Vite (venv-aware Python)
 ├── src/
-│   ├── analysis/pead_analyzer.py           # Orchestrator: CLI + equity research entry
+│   ├── analysis/stock_analyzer.py          # Orchestrator: CLI + equity research entry
 │   ├── equity_research_pipeline/           # Windowed multi-stage pipeline
 │   ├── pead/, models/, scoring/            # Event study + composite score
 │   ├── data/                               # NSE / Yahoo / cache (DataManager)

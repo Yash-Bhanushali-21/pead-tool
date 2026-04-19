@@ -1,6 +1,6 @@
 """
-PEAD Analyzer
-Main orchestrator that coordinates all components of PEAD analysis
+Stock Analyzer
+Main orchestrator for equity/stock analysis: data, scoring, research pipeline, and reporting.
 """
 import json
 import pandas as pd
@@ -25,7 +25,7 @@ from src.fundamentals import FundamentalAnalyzer
 from src.technical import TechnicalAnalyzer
 from src.utils.time_compat import is_instant_after_reference, to_naive_utc_datetime
 from src.equity_research_pipeline.full_run_steps import select_equity_research_stages
-from src.equity_research_pipeline.logging_utils import equity_research_log_adapter
+from src.equity_research_pipeline.logging_utils import equity_research_log_adapter, format_equity_run_ctx
 from src.equity_research_pipeline.options import EquityResearchRunOptions
 from src.equity_research_pipeline.context import new_equity_run_context
 from src.equity_research_pipeline.runner import execute_pipeline
@@ -34,16 +34,17 @@ from src.equity_research_pipeline.scoring_steps import SCORING_ONLY_STEPS, new_s
 logger = logging.getLogger(__name__)
 
 
-class PEADAnalyzer:
+class StockAnalyzer:
     """
-    Main PEAD analysis orchestrator
+    Main stock / equity analysis orchestrator.
 
-    Coordinates data fetching, modeling, scoring, and reporting
+    Coordinates data fetching, modeling, scoring (including legacy PEAD-style components where
+    configured), equity research pipeline runs, and reporting.
     """
 
     def __init__(self, use_cache: bool = True):
         """
-        Initialize PEAD analyzer
+        Initialize the stock analyzer.
 
         Parameters
         ----------
@@ -59,7 +60,7 @@ class PEADAnalyzer:
         self.fundamental_analyzer = FundamentalAnalyzer()
         self.technical_analyzer = TechnicalAnalyzer()
 
-        logger.info("PEAD Analyzer initialized")
+        logger.info("StockAnalyzer initialized")
 
     def analyze_announcement(
         self,
@@ -116,6 +117,7 @@ class PEADAnalyzer:
         market_sentiment_max_articles: int = 40,
         include_symbol_news_ai_digest: bool = True,
         include_market_news_ai_digest: bool = True,
+        technical_include_ai_verdict: bool = False,
         pipeline_stages: Optional[Tuple[str, ...]] = None,
     ) -> Dict:
         """
@@ -148,6 +150,8 @@ class PEADAnalyzer:
             Cap for the market-sentiment collector merge.
         include_symbol_news_ai_digest, include_market_news_ai_digest : bool
             When False, skips the final OpenAI ``ai_digest`` narrative for that pass (lexicon + optional headline synthesis unchanged).
+        technical_include_ai_verdict : bool
+            When True, after the technical snapshot step, call the OpenAI technical-research commentary (entry/exit *discussion* for the next session; not advice).
         pipeline_stages : tuple of str, optional
             Run only these pipeline stage ids (see ``EQUITY_PIPELINE_STAGE_IDS`` / tools API).
             ``None`` runs the full pipeline. OHLCV fetch is auto-inserted when required.
@@ -161,7 +165,6 @@ class PEADAnalyzer:
         """
         a0 = to_naive_utc_datetime(analysis_start)
         a1 = to_naive_utc_datetime(analysis_end)
-        logger.info("Equity research run: %s %s .. %s", symbol, a0, a1)
 
         if is_instant_after_reference(a1):
             logger.error(
@@ -181,9 +184,17 @@ class PEADAnalyzer:
             market_sentiment_max_articles=int(market_sentiment_max_articles),
             include_symbol_news_ai_digest=bool(include_symbol_news_ai_digest),
             include_market_news_ai_digest=bool(include_market_news_ai_digest),
+            technical_include_ai_verdict=bool(technical_include_ai_verdict),
             pipeline_stages=tuple(pipeline_stages) if pipeline_stages is not None else None,
         )
         ctx = new_equity_run_context(symbol, a0, a1, opts)
+        ctx.results["technical_include_ai_verdict"] = bool(opts.technical_include_ai_verdict)
+        logger.info(
+            "equity_research.run_started %s calendar=%s..%s",
+            format_equity_run_ctx(ctx),
+            a0.date().isoformat(),
+            a1.date().isoformat(),
+        )
         rlog = equity_research_log_adapter(logger, run_id=ctx.run_id, symbol=ctx.symbol)
 
         try:
@@ -191,9 +202,14 @@ class PEADAnalyzer:
             ctx.results["equity_pipeline_stages"] = [n for n, _ in stages]
             execute_pipeline(ctx, self, stages, rlog)
             ctx.results["success"] = True
-            logger.info("Equity research run finished for %s", symbol)
+            logger.info("equity_research.run_finished %s", format_equity_run_ctx(ctx))
         except Exception as e:
-            logger.error("Analysis failed for %s: %s", symbol, e, exc_info=True)
+            logger.error(
+                "equity_research.run_failed %s err=%s",
+                format_equity_run_ctx(ctx),
+                e,
+                exc_info=True,
+            )
             ctx.results["error"] = str(e)
 
         return ctx.results
@@ -223,7 +239,7 @@ class PEADAnalyzer:
                 "mode": "scoring_only",
             }
 
-        logger.info("Scoring-only: fetching OHLCV / index")
+        logger.info("scoring_only.run_started symbol=%s", symbol)
         stock_data, market_data = self.data_manager.prepare_analysis_dataset(
             symbol, announcement_date
         )
@@ -244,11 +260,22 @@ class PEADAnalyzer:
         ctx.results["data_points"] = int(len(stock_data))
 
         rlog = equity_research_log_adapter(logger, run_id=ctx.run_id, symbol=ctx.symbol)
+        logger.info(
+            "scoring_only.pipeline_begin %s announcement_date=%s",
+            format_equity_run_ctx(ctx),
+            announcement_date.date().isoformat(),
+        )
         try:
             execute_pipeline(ctx, self, SCORING_ONLY_STEPS, rlog, trace_key="scoring_pipeline_trace")
             ctx.results["success"] = True
+            logger.info("scoring_only.run_finished %s", format_equity_run_ctx(ctx))
         except Exception as e:
-            logger.error("Scoring-only failed for %s: %s", symbol, e, exc_info=True)
+            logger.error(
+                "scoring_only.run_failed %s err=%s",
+                format_equity_run_ctx(ctx),
+                e,
+                exc_info=True,
+            )
             ctx.results["error"] = str(e)
 
         return ctx.results

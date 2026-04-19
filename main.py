@@ -18,7 +18,7 @@ from pathlib import Path
 # Add project root to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.analysis.pead_analyzer import PEADAnalyzer
+from src.analysis.stock_analyzer import StockAnalyzer
 from src.config.config import config
 from src.fundamentals import FundamentalAnalyzer
 
@@ -141,7 +141,7 @@ def analyze_recent(args):
     print("PEAD TOOL - Analyzing Recent Announcements")
     print("="*70 + "\n")
 
-    analyzer = PEADAnalyzer(use_cache=not args.no_cache)
+    analyzer = StockAnalyzer(use_cache=not args.no_cache)
 
     results, batch_root = analyzer.analyze_recent_announcements(
         n=args.top,
@@ -192,7 +192,7 @@ def analyze_single(args):
     print(f"PEAD TOOL - Analyzing {args.symbol}")
     print("="*70 + "\n")
 
-    analyzer = PEADAnalyzer(use_cache=not args.no_cache)
+    analyzer = StockAnalyzer(use_cache=not args.no_cache)
 
     # Auto-detect announcement date if not provided
     if args.date:
@@ -289,7 +289,7 @@ def analyze_batch(args):
     print(f"Batch run folder:\n  {batch_root.resolve()}\n")
 
     # Analyze each stock
-    analyzer = PEADAnalyzer(use_cache=not args.no_cache)
+    analyzer = StockAnalyzer(use_cache=not args.no_cache)
     results = []
 
     for idx, row in stocks_df.iterrows():

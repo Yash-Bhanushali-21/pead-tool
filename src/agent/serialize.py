@@ -54,6 +54,7 @@ def compact_pead_for_llm(result: Dict[str, Any], max_brief_chars: int = 14000) -
         "price_fetch_calendar_end": result.get("price_fetch_calendar_end"),
         "fundamental_analysis": fa_trim,
         "technical_analysis": result.get("technical_analysis"),
+        "technical_include_ai_verdict": result.get("technical_include_ai_verdict"),
         "technical_tool_response": result.get("technical_tool_response"),
         "news_sentiment": result.get("news_sentiment"),
         "news_tool_response": result.get("news_tool_response"),

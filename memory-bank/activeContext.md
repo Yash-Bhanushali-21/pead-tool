@@ -1,11 +1,13 @@
 # Active context
 
-**Last reviewed:** 2026-04-19 (news layer + Memory Bank — user: document achievements / remaining work)
+**Last reviewed:** 2026-04-19 (Memory Bank sync: data observability, equity pipeline logging, PROJECT_MEMORY)
 
 ## Current focus
 
 - **Memory Bank** is the structured brain: `memory-bank/*.md` + `.cursor/rules/memory-bank.mdc` (always apply).
 - **News research:** Headline collection (RSS, Bing, DDG-lite, HTML discovery, etc.), optional **full-article scrape** (`trafilatura`), TextBlob + optional OpenAI headline synthesis, optional final **`ai_digest`** narrative; citations persisted to SQLite (`news_article_citations`). **Equity single tool** exposes testing toggles for `ai_digest` per pass.
+- **Data layer:** Pluggable **`OHLCVSource`** (`src/data/ohlcv_source.py`); **`DataManager`** merges NSE → Yahoo → jugaad with explicit cache and fallback logging; vendor lines use grep-friendly **`data_fetch source=nse|yahoo|jugaad`** plus **`data_manager.get_stock_data` / `get_market_data`** (cache hit/miss, fallback reasons). Market benchmark path uses **`get_market_data`** / Yahoo index data so **`^NSEI`** is never sent through the NSE-stock Yahoo suffix (`^NSEI.NS`).
+- **Equity research pipeline:** **`execute_pipeline`** logs `equity_research.pipeline` stage start/done/fail with **`run_id`**, **`symbol`**, **`duration_ms`**; stage modules log **`equity_research.stage.<id>`** with **`format_equity_run_ctx`** (`src/equity_research_pipeline/logging_utils.py`); scoring-only path logs **`scoring_pipeline.stage.*`**. Research desk / desk LLM log model and errors with tracebacks where appropriate.
 - **Chat UI:** Session history sidebar, stick-to-bottom scroll, plain text while streaming → Markdown after. App layout uses flex + `min-h-0`.
 - **README / changelog:** `PROJECT_MEMORY.md` **Current snapshot** + **Change log**; sync to README via `scripts/sync_memory_readme.py`.
 
@@ -19,6 +21,7 @@
 
 - Chat persistence: `CHAT_SQLITE_PATH`; `/api/chat/sessions` for list + history.
 - Time: `src/utils/time_compat.py` (naive UTC) to avoid pandas tz crashes.
+- **Market index for RS / benchmark:** `aligned_market_index_close` (`src/technical/market_benchmark.py`) uses **`DataManager.get_market_data`** for the configured **`MARKET_INDEX`** (default **`^NSEI`**), not **`get_stock_data("^NSEI")`**; Yahoo **`nse_to_yahoo_symbol`** leaves symbols starting with **`^`** unchanged.
 - Trade readiness: `src/trade_context/` blended into synthesis when present; research-only disclaimers.
 - **News `ai_digest`:** Gated by `include_symbol_news_ai_digest` / `include_market_news_ai_digest` on equity research options and `PeadSingleRequest`; `include_ai_digest` on `NewsToolRequest` (`POST /api/tools/run/news`); agent tool `run_news_and_sentiment` accepts `include_ai_digest`. When skipped, payload includes `ai_digest_skipped_by_request` for UI copy.
 - **Article preview / citations list:** `build_article_preview_rows` (`src/news/article_preview.py`) orders **dated articles (newest first) then undated** (dedupe by URL) so HTML discovery and other undated hits are not dropped when preview cap is tight after lexicographic sort by `published`.
@@ -28,6 +31,7 @@
 - **Verify end-to-end:** Long window + symbol known to yield `html_discovery` rows; confirm they appear in `articles_preview`, `per_article`, and SQLite citations UI/API (`GET /api/news/articles` if used).
 - **News + citations “still broken” reports:** If any remain, reproduce with checklist in `progress.md` (SQLite path, `fetched_date` UTC vs UI filter, `persisted_citations`, scrape failures).
 - **Standalone News tool UI:** Backend supports `include_ai_digest` on `/api/tools/run/news`; there is **no** dedicated `NewsToolPage.tsx` in repo today — add checkboxes there if a standalone page is introduced or linked from `/tools`.
+- **Data backlog:** Optional **Zerodha (Kite)** integration as an OHLCV/candle source — see **`issues-to-fix/README.md`** §4; design auth, merge order, and compliance before coding.
 - After milestones: bump `progress.md`, append `PROJECT_MEMORY.md` change log, run `sync_memory_readme.py` if snapshot changes.
 - Optional: code-split heavy chat client deps if bundle size hurts.
 

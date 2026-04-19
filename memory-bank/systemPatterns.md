@@ -38,6 +38,16 @@ flowchart LR
 - FastAPI entry: `server/app.py`; tool wiring `server/tools_routes.py`.
 - Chat storage: SQLite helpers under `src/persistence/` (e.g. `sqlite_chat.py`).
 
+## Data layer (OHLCV)
+
+- **`DataManager`** (`src/data/data_manager.py`): tries NSE equity OHLCV first, then Yahoo and optionally **jugaad-data** when the window is short or empty; merge order documented in-module. Market index series: NSE **NIFTY 50** + Yahoo **`MARKET_INDEX`** for backfill.
+- **Logging:** Prefer structured prefixes **`data_fetch`** (per vendor) and **`data_manager.get_stock_data` / `get_market_data`** (cache hit/miss, fallback reason) for operations and debugging.
+
+## Equity research pipeline (observability)
+
+- **`StockAnalyzer.analyze_equity_research`** builds **`EquityResearchRunContext`**, **`equity_research_log_adapter`**, runs **`select_equity_research_stages`** → **`execute_pipeline`** (`src/equity_research_pipeline/runner.py`).
+- **`pipeline_trace`** (and scoring-only **`scoring_pipeline_trace`**) record **`stage`**, **`duration_ms`**, **`ok`**. Log lines include **`run_id`** and **`symbol`** in message text for default formatters; per-stage detail in **`full_run_steps`** / **`scoring_steps`**.
+
 ## News stack (short)
 
 - **Collector** (`src/news/collector.py`) merges RSS / search / HTML discovery into `NewsArticle` list; optional **scrape** enriches bodies (`src/news/article_scraper.py`).

@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 class NSEDataFetcher:
-    """Fetch data from NSE for equity and announcements"""
+    """Fetch data from NSE for equity and announcements."""
+
+    #: Slug for logs and :class:`~src.data.ohlcv_source.OHLCVSource` registration.
+    SOURCE_ID = "nse"
 
     def __init__(self, download_folder: str = './data/nse_downloads'):
         """
@@ -150,17 +153,31 @@ class NSEDataFetcher:
             return None
 
         try:
-            logger.info(f"Fetching stock data for {symbol} from {start_date} to {end_date}")
+            fd = to_calendar_date(start_date)
+            td = to_calendar_date(end_date)
+            logger.info(
+                "data_fetch source=nse kind=equity_ohlcv nse_symbol=%s "
+                "api=nse.fetch_equity_historical_data from_date=%s to_date=%s",
+                symbol,
+                fd,
+                td,
+            )
 
             # NSE package expects datetime.date objects (see fetch_equity_historical_data docs).
             data = self.nse.fetch_equity_historical_data(
                 symbol=symbol,
-                from_date=to_calendar_date(start_date),
-                to_date=to_calendar_date(end_date),
+                from_date=fd,
+                to_date=td,
             )
 
             if data is None or len(data) == 0:
-                logger.warning(f"No data found for {symbol}")
+                logger.warning(
+                    "data_fetch source=nse kind=equity_ohlcv nse_symbol=%s result=empty "
+                    "from_date=%s to_date=%s",
+                    symbol,
+                    fd,
+                    td,
+                )
                 return None
 
             # Convert to DataFrame
@@ -193,19 +210,34 @@ class NSEDataFetcher:
 
             if "Close" not in df.columns:
                 logger.warning(
-                    f"NSE response for {symbol} had no closing price column after mapping; "
-                    "falling back to Yahoo if enabled"
+                    "data_fetch source=nse kind=equity_ohlcv nse_symbol=%s result=invalid "
+                    "reason=no_close_after_column_map",
+                    symbol,
                 )
                 return None
 
             # Calculate returns
             df["Return"] = df["Close"].pct_change()
 
-            logger.info(f"Fetched {len(df)} rows for {symbol}")
+            idx = df.index
+            logger.info(
+                "data_fetch source=nse kind=equity_ohlcv nse_symbol=%s result=ok rows=%d "
+                "bar_first=%s bar_last=%s",
+                symbol,
+                len(df),
+                pd.Timestamp(idx.min()).date().isoformat() if len(idx) else None,
+                pd.Timestamp(idx.max()).date().isoformat() if len(idx) else None,
+            )
             return df
 
         except Exception as e:
-            logger.error(f"Error fetching stock data for {symbol}: {e}")
+            logger.error(
+                "data_fetch source=nse kind=equity_ohlcv nse_symbol=%s api=fetch_equity_historical_data "
+                "error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return None
 
     def get_company_info(self, symbol: str) -> Dict:
@@ -227,11 +259,20 @@ class NSEDataFetcher:
             return {}
 
         try:
+            logger.info(
+                "data_fetch source=nse kind=company_quote nse_symbol=%s api=nse.quote",
+                symbol,
+            )
             # Correct method name: quote or equityQuote
             info = self.nse.quote(symbol)
             return info if info else {}
         except Exception as e:
-            logger.error(f"Error fetching company info for {symbol}: {e}")
+            logger.error(
+                "data_fetch source=nse kind=company_quote nse_symbol=%s error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return {}
 
     def get_index_data(
@@ -262,13 +303,21 @@ class NSEDataFetcher:
             return None
 
         try:
-            logger.info(f"Fetching index data for {index}")
+            fd = to_calendar_date(start_date)
+            td = to_calendar_date(end_date)
+            logger.info(
+                "data_fetch source=nse kind=index_ohlcv index_name=%s "
+                "api=nse.fetch_historical_index_data from_date=%s to_date=%s",
+                index,
+                fd,
+                td,
+            )
 
             # First positional / keyword is ``index`` (not ``symbol``); dates must be ``date``.
             data = self.nse.fetch_historical_index_data(
                 index,
-                from_date=to_calendar_date(start_date),
-                to_date=to_calendar_date(end_date),
+                from_date=fd,
+                to_date=td,
             )
 
             if data:
@@ -279,12 +328,32 @@ class NSEDataFetcher:
                 if 'CH_CLOSING_PRICE' in df.columns:
                     df['Close'] = df['CH_CLOSING_PRICE']
                     df['Return'] = df['Close'].pct_change()
+                idx = df.index
+                logger.info(
+                    "data_fetch source=nse kind=index_ohlcv index_name=%s result=ok rows=%d "
+                    "bar_first=%s bar_last=%s",
+                    index,
+                    len(df),
+                    pd.Timestamp(idx.min()).date().isoformat() if len(idx) else None,
+                    pd.Timestamp(idx.max()).date().isoformat() if len(idx) else None,
+                )
                 return df
 
+            logger.warning(
+                "data_fetch source=nse kind=index_ohlcv index_name=%s result=empty from_date=%s to_date=%s",
+                index,
+                fd,
+                td,
+            )
             return None
 
         except Exception as e:
-            logger.error(f"Error fetching index data: {e}")
+            logger.error(
+                "data_fetch source=nse kind=index_ohlcv index_name=%s error=%s",
+                index,
+                e,
+                exc_info=True,
+            )
             return None
 
     def get_corporate_actions(self, symbol: str) -> pd.DataFrame:
@@ -306,10 +375,19 @@ class NSEDataFetcher:
             return pd.DataFrame()
 
         try:
+            logger.info(
+                "data_fetch source=nse kind=corporate_actions nse_symbol=%s api=nse.get_corporate_actions",
+                symbol,
+            )
             actions = self.nse.get_corporate_actions(symbol)
             if actions:
                 return pd.DataFrame(actions)
             return pd.DataFrame()
         except Exception as e:
-            logger.error(f"Error fetching corporate actions for {symbol}: {e}")
+            logger.error(
+                "data_fetch source=nse kind=corporate_actions nse_symbol=%s error=%s",
+                symbol,
+                e,
+                exc_info=True,
+            )
             return pd.DataFrame()

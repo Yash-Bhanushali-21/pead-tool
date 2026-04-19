@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Set
 
-from src.analysis.pead_analyzer import PEADAnalyzer
+from src.analysis.stock_analyzer import StockAnalyzer
 from src.news.collector import NewsArticle, NewsCollector
 from src.news.article_preview import build_article_preview_rows
 from src.news.article_scraper import enrich_articles_with_scrapes
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_market_sentiment_layer(
-    analyzer: PEADAnalyzer,
+    analyzer: StockAnalyzer,
     symbol: str,
     company_name: str,
     *,

@@ -8,6 +8,7 @@ alwaysApply: false
 
 - **API:** FastAPI in `server/`; use Pydantic models for request bodies; **CORS** via env `PEAD_CORS_ORIGINS`. Prefer **async** handlers; offload blocking PEAD work with **`asyncio.to_thread`** (or equivalent), not the event loop.
 - **Imports:** Project root on `sys.path` when running `uvicorn server.app:app` from repo root; keep imports stable for that layout.
-- **PEAD core:** `src/analysis/pead_analyzer.py` and `src/` modules—preserve statistical meaning of CAR, market model, and scoring; document assumptions when changing formulas.
+- **Analysis core:** `src/analysis/stock_analyzer.py` and `src/` modules—preserve statistical meaning of CAR, market model, and scoring; document assumptions when changing formulas.
+- **OHLCV:** `DataManager` composes pluggable `OHLCVSource` implementations (`src/data/ohlcv_source.py`); register new vendors on `DataManager.ohlcv_sources` and align merge/fallback with `_merge_ohlcv_priority` / `get_stock_data` policy.
 - **Agents:** PydanticAI in `src/agent/`; tools must not fabricate prices or metrics—only return what the pipeline produces.
 - **Secrets:** Never commit API keys; read from environment (`OPENAI_API_KEY`, etc.).
