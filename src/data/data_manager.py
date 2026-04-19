@@ -14,15 +14,22 @@ from pathlib import Path
 
 from src.data.nse_fetcher import NSEDataFetcher
 from src.data.yahoo_fetcher import YahooDataFetcher
+from src.data.jugaad_fetcher import JugaadDataFetcher
 from src.config.config import config
+from src.utils.time_compat import to_calendar_date
 
 logger = logging.getLogger(__name__)
+
+# Bumped when merge / coverage semantics change (invalidates pickles that stored vendor-only windows).
+_STOCK_OHLCV_CACHE_PREFIX = "stock_ohlcv_merged_v2"
+_MARKET_OHLCV_CACHE_PREFIX = "market_ohlcv_merged_v2"
 
 
 class DataManager:
     """
-    Unified data manager with NSE primary and Yahoo Finance fallback
-    Implements caching and data quality checks
+    Unified data manager: NSE (nsepython) → Yahoo (yfinance) → optional jugaad-data (NSE site).
+
+    See :class:`~src.data.yahoo_fetcher.YahooDataFetcher` and :class:`~src.data.jugaad_fetcher.JugaadDataFetcher`.
     """
 
     def __init__(self, use_cache: bool = True):
@@ -36,11 +43,82 @@ class DataManager:
         """
         self.nse_fetcher = NSEDataFetcher()
         self.yahoo_fetcher = YahooDataFetcher()
+        self.jugaad_fetcher = JugaadDataFetcher()
         self.use_cache = use_cache
         self.cache_dir = Path(config.CACHE_DIR)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("DataManager initialized")
+
+    @staticmethod
+    def _ohlcv_missing_request_start(
+        df: Optional[pd.DataFrame],
+        start_date: datetime,
+        slack_calendar_days: int = 14,
+    ) -> bool:
+        """
+        True when the frame has no rows, or its first bar is materially later than the
+        inclusive calendar ``start_date`` (weekends / thin listings — use slack).
+        """
+        if df is None or df.empty:
+            return True
+        work = DataManager._strip_tz_index(df)
+        if work.index.size == 0:
+            return True
+        first = pd.Timestamp(to_calendar_date(work.index.min()))
+        want = pd.Timestamp(to_calendar_date(start_date))
+        return bool(first > want + timedelta(days=slack_calendar_days))
+
+    @staticmethod
+    def _merge_ohlcv_priority(*candidates: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+        """
+        Stack OHLCV from multiple vendors; duplicate calendar days keep the **last** frame
+        (NSE last in call order wins on overlap — Yahoo/jugaad fill history, NSE refines recent).
+        """
+        pieces: List[pd.DataFrame] = []
+        for raw in candidates:
+            if raw is None or raw.empty:
+                continue
+            part = DataManager._strip_tz_index(raw.copy())
+            part.index = pd.to_datetime(part.index, errors="coerce").normalize()
+            part = part[part.index.notna()]
+            if part.empty or "Close" not in part.columns:
+                continue
+            for need in ("Open", "High", "Low"):
+                if need not in part.columns:
+                    part[need] = part["Close"]
+                else:
+                    part[need] = part[need].where(part[need].notna(), part["Close"])
+            if "Volume" not in part.columns:
+                part["Volume"] = 0.0
+            else:
+                part["Volume"] = part["Volume"].fillna(0.0)
+            pieces.append(part[["Open", "High", "Low", "Close", "Volume"]].copy())
+
+        if not pieces:
+            return None
+
+        merged = pd.concat(pieces).sort_index()
+        merged = merged[~merged.index.duplicated(keep="last")]
+        merged["Return"] = merged["Close"].pct_change()
+        merged.index.name = "Date"
+        return merged
+
+    @staticmethod
+    def _clip_ohlcv_calendar_window(
+        df: Optional[pd.DataFrame],
+        start_date: datetime,
+        end_date: datetime,
+    ) -> Optional[pd.DataFrame]:
+        if df is None or df.empty:
+            return df
+        cal_s = pd.Timestamp(to_calendar_date(start_date))
+        cal_e = pd.Timestamp(to_calendar_date(end_date))
+        out = df.loc[(df.index >= cal_s) & (df.index <= cal_e)].copy()
+        if out.empty:
+            return out
+        out["Return"] = out["Close"].pct_change()
+        return out
 
     def _get_cache_path(self, key: str) -> Path:
         """Generate cache file path"""
@@ -152,10 +230,16 @@ class DataManager:
         symbol: str,
         start_date: datetime,
         end_date: datetime,
-        fallback_to_yahoo: bool = True
+        fallback_to_yahoo: bool = True,
+        fallback_to_jugaad: bool = True,
     ) -> Optional[pd.DataFrame]:
         """
-        Get stock data with fallback logic
+        Get stock OHLCV with vendor merge.
+
+        NSE is queried first. If NSE returns **no rows** or **starts too late** relative to
+        ``start_date`` (see slack in :meth:`_ohlcv_missing_request_start`), Yahoo is fetched for
+        the full window and merged (Yahoo then NSE; overlapping days keep NSE). If the merged
+        series still lacks early coverage, ``jugaad-data`` is tried the same way.
 
         Parameters
         ----------
@@ -166,28 +250,82 @@ class DataManager:
         end_date : datetime
             End date
         fallback_to_yahoo : bool
-            Use Yahoo as fallback if NSE fails
+            Pull Yahoo when NSE is empty or truncated at the head of the window.
+        fallback_to_jugaad : bool
+            Pull jugaad-data when NSE is short on history and Yahoo still does not reach the
+            requested start (or Yahoo is empty). No-op if the package is not installed.
 
         Returns
         -------
         pd.DataFrame or None
             Stock OHLCV data
         """
-        cache_key = f"stock_{symbol}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        cache_key = (
+            f"{_STOCK_OHLCV_CACHE_PREFIX}_{symbol}_"
+            f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        )
 
         # Try cache
         cached = self._load_from_cache(cache_key)
         if cached is not None:
             return cached
 
-        # Try NSE first
-        logger.info(f"Fetching {symbol} from NSE")
-        data = self.nse_fetcher.get_stock_data(symbol, start_date, end_date)
+        logger.info("Fetching %s from NSE (calendar %s .. %s)", symbol, start_date.date(), end_date.date())
+        nse_df = self.nse_fetcher.get_stock_data(symbol, start_date, end_date)
 
-        # Fallback to Yahoo if NSE fails
-        if (data is None or data.empty) and fallback_to_yahoo:
-            logger.info(f"NSE failed, trying Yahoo for {symbol}")
-            data = self.yahoo_fetcher.get_stock_data(symbol, start_date, end_date)
+        yahoo_df: Optional[pd.DataFrame] = None
+        jugaad_df: Optional[pd.DataFrame] = None
+
+        miss_nse = self._ohlcv_missing_request_start(nse_df, start_date)
+        if miss_nse and fallback_to_yahoo:
+            if nse_df is not None and not nse_df.empty:
+                logger.info(
+                    "NSE OHLCV for %s starts at %s (requested from %s); pulling Yahoo for full-window backfill",
+                    symbol,
+                    to_calendar_date(nse_df.index.min()),
+                    to_calendar_date(start_date),
+                )
+            else:
+                logger.info("NSE returned no rows for %s; trying Yahoo", symbol)
+            yahoo_df = self.yahoo_fetcher.get_stock_data(symbol, start_date, end_date)
+
+        # jugaad-data (NSE site): use when NSE is short on history *and* Yahoo did not deliver an
+        # early enough first bar (empty Yahoo still triggers this — do not require a merge check).
+        if miss_nse and fallback_to_jugaad:
+            yahoo_still_short = yahoo_df is None or yahoo_df.empty or self._ohlcv_missing_request_start(
+                yahoo_df, start_date
+            )
+            if yahoo_still_short:
+                logger.info(
+                    "NSE truncated or empty and Yahoo still lacks window start for %s; "
+                    "fetching jugaad-data (NSE site) for the same calendar span",
+                    symbol,
+                )
+                jugaad_df = self.jugaad_fetcher.get_stock_data(symbol, start_date, end_date)
+
+        if (
+            nse_df is not None
+            and not nse_df.empty
+            and not self._ohlcv_missing_request_start(nse_df, start_date)
+        ):
+            # NSE alone covers the requested start — keep any extra NSE columns (e.g. VWAP).
+            data = self._clip_ohlcv_calendar_window(
+                self._strip_tz_index(nse_df.copy()),
+                start_date,
+                end_date,
+            )
+        else:
+            data = self._merge_ohlcv_priority(yahoo_df, jugaad_df, nse_df)
+            data = self._clip_ohlcv_calendar_window(data, start_date, end_date)
+
+        if data is not None and not data.empty and self._ohlcv_missing_request_start(data, start_date):
+            logger.warning(
+                "OHLCV for %s still does not reach requested start %s (first bar %s) after "
+                "NSE + Yahoo (+ jugaad when tried). Likely listing/IPO after the window, or all feeds truncated.",
+                symbol,
+                to_calendar_date(start_date),
+                to_calendar_date(data.index.min()),
+            )
 
         # Validate data quality
         if data is not None and not data.empty:
@@ -217,21 +355,44 @@ class DataManager:
         pd.DataFrame or None
             Market index data
         """
-        cache_key = f"market_{config.MARKET_INDEX}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        cache_key = (
+            f"{_MARKET_OHLCV_CACHE_PREFIX}_{config.MARKET_INDEX}_"
+            f"{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}"
+        )
 
         # Try cache
         cached = self._load_from_cache(cache_key)
         if cached is not None:
             return cached
 
-        # Try NSE first
         logger.info("Fetching market index from NSE")
-        data = self.nse_fetcher.get_index_data('NIFTY 50', start_date, end_date)
+        nse_idx = self.nse_fetcher.get_index_data("NIFTY 50", start_date, end_date)
 
-        # Fallback to Yahoo
-        if data is None or data.empty:
-            logger.info("NSE failed, trying Yahoo for market index")
-            data = self.yahoo_fetcher.get_index_data(config.MARKET_INDEX, start_date, end_date)
+        yahoo_idx: Optional[pd.DataFrame] = None
+        if self._ohlcv_missing_request_start(nse_idx, start_date):
+            if nse_idx is not None and not nse_idx.empty:
+                logger.info(
+                    "NSE index series starts at %s (requested from %s); pulling Yahoo backfill",
+                    to_calendar_date(nse_idx.index.min()),
+                    to_calendar_date(start_date),
+                )
+            else:
+                logger.info("NSE index empty; trying Yahoo for market index")
+            yahoo_idx = self.yahoo_fetcher.get_index_data(config.MARKET_INDEX, start_date, end_date)
+
+        if (
+            nse_idx is not None
+            and not nse_idx.empty
+            and not self._ohlcv_missing_request_start(nse_idx, start_date)
+        ):
+            data = self._clip_ohlcv_calendar_window(
+                self._strip_tz_index(nse_idx.copy()),
+                start_date,
+                end_date,
+            )
+        else:
+            data = self._merge_ohlcv_priority(yahoo_idx, nse_idx)
+            data = self._clip_ohlcv_calendar_window(data, start_date, end_date)
 
         if data is not None and not data.empty:
             self._save_to_cache(cache_key, data)
@@ -349,9 +510,9 @@ class DataManager:
         tuple
             (stock_data, market_data)
         """
-        # Wide calendar span so thin tickers still pull max available history from vendors
-        start_date = announcement_date - timedelta(days=max(400, pre_window * 3))
-        end_date = announcement_date + timedelta(days=post_window * 2)
+        start_date, end_date = self.event_window_fetch_bounds(
+            announcement_date, pre_window=pre_window, post_window=post_window
+        )
 
         logger.info(f"Preparing dataset for {symbol} around {announcement_date}")
 
@@ -373,6 +534,20 @@ class DataManager:
 
         return stock_data, market_data
 
+    @staticmethod
+    def event_window_fetch_bounds(
+        announcement_date: datetime,
+        pre_window: int = 120,
+        post_window: int = 90,
+    ) -> Tuple[datetime, datetime]:
+        """
+        Calendar span used by :meth:`prepare_analysis_dataset` and
+        :meth:`get_stock_data_for_event_window` (wide window so thin tickers still get vendor history).
+        """
+        start_date = announcement_date - timedelta(days=max(400, pre_window * 3))
+        end_date = announcement_date + timedelta(days=post_window * 2)
+        return start_date, end_date
+
     def get_stock_data_for_event_window(
         self,
         symbol: str,
@@ -385,8 +560,9 @@ class DataManager:
         (no index alignment). Use for technical snapshots when the market series is
         unnecessary or unavailable.
         """
-        start_date = announcement_date - timedelta(days=max(400, pre_window * 3))
-        end_date = announcement_date + timedelta(days=post_window * 2)
+        start_date, end_date = self.event_window_fetch_bounds(
+            announcement_date, pre_window=pre_window, post_window=post_window
+        )
         return self.get_stock_data(symbol, start_date, end_date)
 
     @staticmethod

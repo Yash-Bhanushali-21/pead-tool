@@ -13,7 +13,7 @@ def compact_pead_for_llm(result: Dict[str, Any], max_brief_chars: int = 14000) -
         return {"success": False, "error": result.get("error")}
 
     brief = result.get("research_brief") or ""
-    if len(brief) > max_brief_chars:
+    if brief and len(brief) > max_brief_chars:
         brief = brief[:max_brief_chars] + "\n...[truncated]"
 
     fa = result.get("fundamental_analysis")
@@ -41,21 +41,35 @@ def compact_pead_for_llm(result: Dict[str, Any], max_brief_chars: int = 14000) -
             "headline_ratios": headline_ratios or None,
         }
 
-    return {
+    out: Dict[str, Any] = {
         "success": True,
         "symbol": result.get("symbol"),
         "announcement_date": str(result.get("announcement_date")),
+        "analysis_period_start": result.get("analysis_period_start"),
+        "analysis_period_end": result.get("analysis_period_end"),
         "output_dir": result.get("output_dir"),
-        "composite_score": result.get("composite_score"),
-        "car_data": result.get("car_data"),
-        "market_model": result.get("market_model"),
-        "synthesis": result.get("synthesis"),
-        "research_brief_excerpt": brief,
+        "pipeline_kind": result.get("pipeline_kind"),
+        "price_window_source": result.get("price_window_source"),
+        "price_fetch_calendar_start": result.get("price_fetch_calendar_start"),
+        "price_fetch_calendar_end": result.get("price_fetch_calendar_end"),
         "fundamental_analysis": fa_trim,
         "technical_analysis": result.get("technical_analysis"),
+        "technical_tool_response": result.get("technical_tool_response"),
         "news_sentiment": result.get("news_sentiment"),
+        "news_tool_response": result.get("news_tool_response"),
+        "market_sentiment": result.get("market_sentiment"),
+        "market_tool_response": result.get("market_tool_response"),
         "trade_context": result.get("trade_context"),
+        "research_desk": result.get("research_desk"),
+        "pipeline_trace": result.get("pipeline_trace"),
+        "equity_pipeline_stages": result.get("equity_pipeline_stages"),
     }
+    if brief:
+        out["research_brief_excerpt"] = brief
+    for k in ("composite_score", "car_data", "market_model", "synthesis"):
+        if result.get(k) is not None:
+            out[k] = result[k]
+    return out
 
 
 def json_dumps_safe(obj: Any) -> str:

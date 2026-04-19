@@ -1,23 +1,28 @@
 import {
   BrowserRouter,
   NavLink,
+  Navigate,
   Outlet,
   Route,
   Routes,
   useLocation,
 } from "react-router-dom";
 import ChatPage from "./pages/ChatPage";
-import DocumentPdfToolPage from "./pages/tools/DocumentPdfToolPage";
-import ExecutionSnapshotToolPage from "./pages/tools/ExecutionSnapshotToolPage";
-import FundamentalsToolPage from "./pages/tools/FundamentalsToolPage";
-import NewsToolPage from "./pages/tools/NewsToolPage";
-import PeadRecentToolPage from "./pages/tools/PeadRecentToolPage";
 import PeadSingleToolPage from "./pages/tools/PeadSingleToolPage";
-import ScoringToolPage from "./pages/tools/ScoringToolPage";
-import TechnicalToolPage from "./pages/tools/TechnicalToolPage";
-import ToolsHub from "./pages/tools/ToolsHub";
-import TradeReadinessOnlyToolPage from "./pages/tools/TradeReadinessOnlyToolPage";
-import YahooCalendarToolPage from "./pages/tools/YahooCalendarToolPage";
+
+/** Old tool URLs → unified equity pipeline at `/tools`. */
+const LEGACY_TOOL_PATHS = [
+  "pead/single",
+  "pead/recent",
+  "fundamentals",
+  "technical",
+  "news",
+  "scoring",
+  "trade-readiness",
+  "document-pdf",
+  "execution-snapshot",
+  "yahoo-calendar",
+] as const;
 
 function Layout() {
   const loc = useLocation();
@@ -75,17 +80,14 @@ export default function App() {
       <Routes>
         <Route element={<Layout />}>
           <Route path="/" element={<ChatPage />} />
-          <Route path="/tools" element={<ToolsHub />} />
-          <Route path="/tools/pead/single" element={<PeadSingleToolPage />} />
-          <Route path="/tools/pead/recent" element={<PeadRecentToolPage />} />
-          <Route path="/tools/fundamentals" element={<FundamentalsToolPage />} />
-          <Route path="/tools/technical" element={<TechnicalToolPage />} />
-          <Route path="/tools/news" element={<NewsToolPage />} />
-          <Route path="/tools/scoring" element={<ScoringToolPage />} />
-          <Route path="/tools/trade-readiness" element={<TradeReadinessOnlyToolPage />} />
-          <Route path="/tools/document-pdf" element={<DocumentPdfToolPage />} />
-          <Route path="/tools/execution-snapshot" element={<ExecutionSnapshotToolPage />} />
-          <Route path="/tools/yahoo-calendar" element={<YahooCalendarToolPage />} />
+          <Route path="/tools" element={<PeadSingleToolPage />} />
+          {LEGACY_TOOL_PATHS.map((suffix) => (
+            <Route
+              key={suffix}
+              path={`/tools/${suffix}`}
+              element={<Navigate to="/tools" replace />}
+            />
+          ))}
         </Route>
       </Routes>
     </BrowserRouter>

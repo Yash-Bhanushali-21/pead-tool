@@ -13,7 +13,7 @@ Analysts and researchers need **repeatable, explainable PEAD-style analysis** on
 ## UX goals
 
 - **Chat:** Streamed replies, readable Markdown after completion, stable scroll while streaming (plain text during token stream), session history sidebar (collapsible on desktop).
-- **Tools:** Direct access to PEAD and auxiliary tools without always going through chat.
+- **Tools:** Direct access to PEAD and auxiliary tools without always going through chat. Equity single run exposes optional switches (e.g. **skip final news `ai_digest`**) for faster/cheaper testing when iterating on collection or citations.
 - **Tone:** Institutional analyst style where applicable; not retail hype (see `.cursor/rules/institutional-analyst-tone.mdc`).
 
 ## Users

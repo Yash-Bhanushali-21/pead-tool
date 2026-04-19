@@ -49,6 +49,14 @@ def _float(key: str, default: float) -> float:
         return default
 
 
+def _csv_url_list(key: str, default_csv: str) -> List[str]:
+    """Comma-separated URLs (e.g. RSS) from env; trims empties."""
+    raw = _get(key, default_csv)
+    if not raw:
+        return []
+    return [p.strip() for p in str(raw).split(",") if p.strip()]
+
+
 def _int_list(key: str, default: List[int]) -> List[int]:
     raw = _get(key)
     if not raw:
@@ -133,6 +141,7 @@ CONFIG: Dict[str, Any] = {
     # —— OpenAI model names ——
     "OPENAI_NEWS_MODEL": _get("OPENAI_NEWS_MODEL", "gpt-4o-mini"),
     "OPENAI_TECH_VERDICT_MODEL": _get("OPENAI_TECH_VERDICT_MODEL", "gpt-4o-mini"),
+    "OPENAI_EQUITY_DESK_MODEL": _get("OPENAI_EQUITY_DESK_MODEL", "gpt-4o-mini"),
     "AGENT_MODEL": _get("AGENT_MODEL", "openai:gpt-4o-mini"),
     "AGENT_SYNTHESIS_MODEL": _get("AGENT_SYNTHESIS_MODEL", "openai:gpt-4o-mini"),
     # —— Market / PEAD ——
@@ -153,12 +162,37 @@ CONFIG: Dict[str, Any] = {
     "DRIFT_LONG_WINDOW": _int("DRIFT_LONG_WINDOW", 30),
     "NEWS_LOOKBACK_DAYS": _int("NEWS_LOOKBACK_DAYS", 90),
     "NEWS_MAX_ARTICLES": _int("NEWS_MAX_ARTICLES", 80),
+    # Extra RSS URLs for news/market collectors (comma-separated). Defaults: India business wires.
+    "NEWS_EXTRA_RSS_FEEDS": _csv_url_list(
+        "PEAD_NEWS_EXTRA_RSS_FEEDS",
+        "https://www.moneycontrol.com/rss/latestnews.xml,"
+        "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    ),
+    # Final LLM digest on top of lexicon + synthesis (requires OPENAI_API_KEY).
+    "OPENAI_NEWS_DIGEST_MODEL": _get("OPENAI_NEWS_DIGEST_MODEL", "") or None,
+    "NEWS_AI_DIGEST_ENABLED": _bool("NEWS_AI_DIGEST_ENABLED", True),
+    # Google News RSS: slice long windows with after:/before: (unofficial but widely used).
+    "NEWS_GOOGLE_CHUNK_THRESHOLD_DAYS": _int("NEWS_GOOGLE_CHUNK_THRESHOLD_DAYS", 90),
+    "NEWS_GOOGLE_CHUNK_DAYS": _int("NEWS_GOOGLE_CHUNK_DAYS", 120),
+    "NEWS_GOOGLE_MAX_CHUNKS": _int("NEWS_GOOGLE_MAX_CHUNKS", 20),
+    # NewsAPI.org ``/v2/everything`` (optional; set ``NEWSAPI_API_KEY``).
+    "NEWSAPI_API_KEY": _get("NEWSAPI_API_KEY", "") or "",
+    "NEWSAPI_MAX_RESULTS": _int("NEWSAPI_MAX_RESULTS", 80),
+    # HTML search-result link discovery (Bing + DDG HTML; no headless browser).
+    "NEWS_HTML_DISCOVERY_ENABLED": _bool("NEWS_HTML_DISCOVERY_ENABLED", True),
+    "NEWS_HTML_DISCOVERY_MAX_TOTAL": _int("NEWS_HTML_DISCOVERY_MAX_TOTAL", 28),
+    # Trafilatura body fetch cap default for equity pipeline (individual API calls may pass lower).
+    "NEWS_BODY_SCRAPE_DEFAULT": _int("NEWS_BODY_SCRAPE_DEFAULT", 32),
     "AGENT_OUTPUT_SUBDIR": _get("AGENT_OUTPUT_SUBDIR", "agent_runs"),
     # Chat persistence (SQLite)
     "CHAT_SQLITE_PATH": _get("CHAT_SQLITE_PATH", "./data/pead_chat.sqlite3"),
     # News citations (defaults to same file as chat if unset)
     "NEWS_SQLITE_PATH": _get("NEWS_SQLITE_PATH", "") or None,
     "CHAT_PERSIST_ENABLED": _bool("CHAT_PERSIST_ENABLED", True),
+    # Mem0 (https://github.com/mem0ai/mem0) — optional chat long-term memory; requires ``pip install mem0ai``
+    "MEM0_ENABLED": _bool("MEM0_ENABLED", False),
+    "MEM0_TOP_K": _int("MEM0_TOP_K", 5),
+    "MEM0_DEFAULT_USER_ID": _get("MEM0_DEFAULT_USER_ID", "local"),
     "SCORING_WEIGHTS": _build_scoring_weights(),
     "SENTIMENT_KEYWORDS_POSITIVE": _positive_keywords(),
     "SENTIMENT_KEYWORDS_NEGATIVE": _negative_keywords(),

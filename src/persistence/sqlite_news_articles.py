@@ -22,6 +22,39 @@ def _utc_today_str() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
+def _json_safe_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ensure metadata is JSON-serializable for SQLite (trafilatura / scrapers may put lxml nodes
+    or other opaque objects in nested structures).
+    """
+
+    def _safe(v: Any) -> Any:
+        if v is None or isinstance(v, (bool, int, float, str)):
+            return v
+        if isinstance(v, datetime):
+            try:
+                if v.tzinfo is not None:
+                    return v.astimezone(timezone.utc).isoformat()
+                return v.isoformat()
+            except Exception:
+                return str(v)
+        if isinstance(v, dict):
+            return {str(k): _safe(x) for k, x in v.items()}
+        if isinstance(v, (list, tuple, set)):
+            return [_safe(x) for x in v][:200]
+        # lxml.etree._Element (tag + itertext); avoid importing lxml if unused
+        if getattr(v, "tag", None) is not None and callable(getattr(v, "itertext", None)):
+            try:
+                return "".join(v.itertext())[:4000]
+            except Exception:
+                return str(v)[:4000]
+        return str(v)[:8000]
+
+    if not isinstance(meta, dict):
+        return {}
+    return _safe(meta)
+
+
 class NewsArticleStore:
     def __init__(self, path: str):
         self.path = str(Path(path).expanduser().resolve())
@@ -83,6 +116,9 @@ class NewsArticleStore:
                 meta: Dict[str, Any] = dict(a.scrape_metadata or {})
                 if extra.get("metadata"):
                     meta = {**meta, **(extra["metadata"] or {})}
+                meta["collector_source"] = a.source
+                meta["body_scrape_present"] = bool((a.body_text or "").strip())
+                meta = _json_safe_metadata(meta)
                 body_ex = (a.body_text or "")[:2000] if (a.body_text or "").strip() else None
                 scrape_ok = 1 if extra.get("scrape_ok") else 0
                 pol = extra.get("polarity")
@@ -117,7 +153,7 @@ class NewsArticleStore:
                         a.source,
                         (a.summary or "")[:4000],
                         body_ex,
-                        json.dumps(meta, ensure_ascii=False),
+                        json.dumps(meta, ensure_ascii=False, allow_nan=False),
                         scrape_ok,
                         (a.scrape_error or extra.get("scrape_error"))[:2000]
                         if (a.scrape_error or extra.get("scrape_error"))

@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 from src.config.config import CONFIG, config
 from src.news.collector import NewsArticle
+from src.news.digest_llm import run_news_ai_digest
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +49,16 @@ def score_to_stance(score_0_100: float) -> str:
 
 
 def analyze_articles_lexicon(articles: List[NewsArticle]) -> Dict[str, Any]:
-    """Aggregate polarity → 0–100 score (50 = neutral)."""
+    """Aggregate polarity → 0–100 score. No articles → no synthetic neutral score."""
     if not articles:
         return {
-            "news_score_0_100": 50.0,
-            "mean_polarity": 0.0,
-            "mean_subjectivity": 0.0,
+            "news_score_0_100": None,
+            "mean_polarity": None,
+            "mean_subjectivity": None,
             "article_count": 0,
-            "lexicon_stance": "neutral",
+            "lexicon_stance": "no_articles",
             "method": "textblob",
+            "score_unavailable_reason": "no_headlines_collected",
         }
 
     pols, subs = [], []
@@ -160,7 +162,7 @@ def _map_llm_to_score(llm: Dict[str, Any]) -> float:
     return base * conf + 50.0 * (1.0 - conf)
 
 
-def per_article_lexicon(articles: List[NewsArticle], limit: int = 40) -> List[Dict[str, Any]]:
+def per_article_lexicon(articles: List[NewsArticle], limit: int = 80) -> List[Dict[str, Any]]:
     """Per-article polarity + stance for transparency (research only)."""
     rows: List[Dict[str, Any]] = []
     for a in articles[:limit]:
@@ -191,6 +193,8 @@ def run_news_sentiment_pipeline(
     symbol: str,
     company_name: str,
     articles: List[NewsArticle],
+    *,
+    include_ai_digest: bool = True,
 ) -> Dict[str, Any]:
     """
     Lexicon aggregate + optional LLM narrative; combined score when LLM present.
@@ -207,8 +211,12 @@ def run_news_sentiment_pipeline(
 
     if llm:
         llm_score = _map_llm_to_score(llm)
-        combined = 0.45 * lex["news_score_0_100"] + 0.55 * llm_score
-        out["news_score_0_100"] = float(max(0.0, min(100.0, combined)))
+        lx = lex.get("news_score_0_100")
+        if lx is not None:
+            combined = 0.45 * float(lx) + 0.55 * llm_score
+            out["news_score_0_100"] = float(max(0.0, min(100.0, combined)))
+        else:
+            out["news_score_0_100"] = float(max(0.0, min(100.0, llm_score)))
         out["method"] = "textblob+openai"
         overall = (llm.get("overall") or "neutral").lower()
         if "bull" in overall:
@@ -222,10 +230,16 @@ def run_news_sentiment_pipeline(
         out["method"] = "textblob"
         out["llm_stance"] = None
 
-    out["stock_media_stance"] = score_to_stance(float(out["news_score_0_100"]))
+    ns = out.get("news_score_0_100")
+    if ns is not None:
+        out["stock_media_stance"] = score_to_stance(float(ns))
+        score_part = f"score {float(ns):.1f}/100"
+    else:
+        out["stock_media_stance"] = "no_score"
+        score_part = "score unavailable (no headline sample)"
     out["stance_summary"] = (
         f"Aggregate media tone: {out['stock_media_stance']} "
-        f"(score {out['news_score_0_100']:.1f}/100; lexicon {lex.get('lexicon_stance', 'neutral')}"
+        f"({score_part}; lexicon {lex.get('lexicon_stance', 'n/a')}"
         + (f", LLM {out.get('llm_stance')}" if out.get("llm_stance") else "")
         + "). Research context only — not a buy/sell recommendation."
     )
@@ -234,5 +248,18 @@ def run_news_sentiment_pipeline(
         "Media sentiment is noisy and incomplete; many articles are headlines only or blocked from scraping. "
         "Not investment advice."
     )
+
+    if include_ai_digest:
+        digest = run_news_ai_digest(symbol, company_name, articles, out)
+        if digest:
+            out["ai_digest"] = digest
+            out["ai_digest_used"] = True
+        else:
+            out["ai_digest"] = None
+            out["ai_digest_used"] = False
+    else:
+        out["ai_digest"] = None
+        out["ai_digest_used"] = False
+        out["ai_digest_skipped_by_request"] = True
 
     return out

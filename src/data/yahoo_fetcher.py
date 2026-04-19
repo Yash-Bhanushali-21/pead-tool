@@ -1,11 +1,12 @@
 """
-Yahoo Finance Data Fetcher
-Fallback/supplementary data source when NSE data is unavailable
+Yahoo Finance data fetcher using `yfinance` (https://github.com/ranaroussi/yfinance ).
+
+Fallback when NSE (nsepython) is unavailable. Yahoo terms apply; library is unaffiliated with Yahoo.
 """
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Tuple, Any
+from datetime import date, datetime, timedelta
+from typing import Any, Dict, Optional, Tuple
 import logging
 import yfinance as yf
 
@@ -13,9 +14,50 @@ from src.utils.time_compat import to_calendar_date
 
 logger = logging.getLogger(__name__)
 
+# If a start/end ``history()`` call returns bars whose first session is this many calendar
+# days after ``start_d``, yfinance often served a *tail-only* slice — retry ``period="max"``.
+_YAHOO_TAIL_ONLY_SLACK_DAYS = 14
+
 
 class YahooDataFetcher:
     """Fetch data from Yahoo Finance as fallback"""
+
+    @staticmethod
+    def _squash_multilevel_columns(df: pd.DataFrame) -> pd.DataFrame:
+        """yfinance 0.2+ may return columns like ``(Open, TICKER.NS)``."""
+        if not isinstance(df.columns, pd.MultiIndex):
+            return df
+        out = df.copy()
+        out.columns = [str(c[0]) for c in out.columns]
+        return out
+
+    @staticmethod
+    def _calendar_first_index_day(df: Optional[pd.DataFrame]) -> Optional[pd.Timestamp]:
+        if df is None or df.empty:
+            return None
+        idx = pd.DatetimeIndex(pd.to_datetime(df.index, utc=True)).tz_convert(None).normalize()
+        return pd.Timestamp(to_calendar_date(idx.min()))
+
+    @staticmethod
+    def _clip_to_calendar_range(df: pd.DataFrame, start_d: date, end_d: date) -> pd.DataFrame:
+        """Inclusive calendar clip; index normalized to naive midnight."""
+        if df.empty:
+            return df
+        work = df.copy()
+        idx = pd.DatetimeIndex(pd.to_datetime(work.index, utc=True)).tz_convert(None).normalize()
+        work.index = idx
+        lo = pd.Timestamp(to_calendar_date(start_d))
+        hi = pd.Timestamp(to_calendar_date(end_d))
+        return work.loc[(work.index >= lo) & (work.index <= hi)].copy()
+
+    @staticmethod
+    def _yahoo_tail_only_slice(df: pd.DataFrame, want_start: date) -> bool:
+        if df is None or df.empty:
+            return False
+        first = YahooDataFetcher._calendar_first_index_day(df)
+        if first is None:
+            return False
+        return bool(first > pd.Timestamp(want_start) + timedelta(days=_YAHOO_TAIL_ONLY_SLACK_DAYS))
 
     @staticmethod
     def nse_to_yahoo_symbol(nse_symbol: str) -> str:
@@ -69,17 +111,47 @@ class YahooDataFetcher:
             start_d = to_calendar_date(start_date)
             end_d = to_calendar_date(end_date)
             end_exclusive = end_d + timedelta(days=1)
-            df = ticker.history(start=start_d, end=end_exclusive)
+            df = ticker.history(start=start_d, end=end_exclusive, auto_adjust=True, actions=False)
+            df = self._squash_multilevel_columns(df)
 
             if df.empty:
                 logger.warning(f"No Yahoo data for {yahoo_symbol}")
                 return None
+            if "Close" not in df.columns:
+                logger.warning("Yahoo response for %s has no Close column after normalize", yahoo_symbol)
+                return None
+
+            if self._yahoo_tail_only_slice(df, start_d):
+                logger.warning(
+                    "Yahoo range query for %s is tail-only (first bar %s vs requested %s); "
+                    "retrying period=max and clipping to window",
+                    yahoo_symbol,
+                    self._calendar_first_index_day(df),
+                    start_d,
+                )
+                df_max = ticker.history(period="max", auto_adjust=True, actions=False)
+                df_max = self._squash_multilevel_columns(df_max)
+                if df_max is not None and not df_max.empty:
+                    clipped = self._clip_to_calendar_range(df_max, start_d, end_d)
+                    first_range = self._calendar_first_index_day(df)
+                    first_clip = self._calendar_first_index_day(clipped)
+                    if (
+                        not clipped.empty
+                        and first_clip is not None
+                        and (first_range is None or first_clip < first_range or len(clipped) > len(df))
+                    ):
+                        df = clipped
+                        logger.info(
+                            "Yahoo period=max repaired history for %s (%d rows in window)",
+                            yahoo_symbol,
+                            len(df),
+                        )
 
             # Calculate returns
-            df['Return'] = df['Close'].pct_change()
+            df["Return"] = df["Close"].pct_change()
 
             # Ensure date index
-            df.index.name = 'Date'
+            df.index.name = "Date"
 
             logger.info(f"Fetched {len(df)} rows from Yahoo for {yahoo_symbol}")
             return df
@@ -118,15 +190,44 @@ class YahooDataFetcher:
             start_d = to_calendar_date(start_date)
             end_d = to_calendar_date(end_date)
             end_exclusive = end_d + timedelta(days=1)
-            df = ticker.history(start=start_d, end=end_exclusive)
+            df = ticker.history(start=start_d, end=end_exclusive, auto_adjust=True, actions=False)
+            df = self._squash_multilevel_columns(df)
 
             if df.empty:
                 logger.warning(f"No Yahoo data for index {index_symbol}")
                 return None
+            if "Close" not in df.columns:
+                logger.warning("Yahoo index response for %s has no Close after normalize", index_symbol)
+                return None
 
-            # Calculate returns
-            df['Return'] = df['Close'].pct_change()
-            df.index.name = 'Date'
+            if self._yahoo_tail_only_slice(df, start_d):
+                logger.warning(
+                    "Yahoo range query for index %s is tail-only (first bar %s vs requested %s); "
+                    "retrying period=max",
+                    index_symbol,
+                    self._calendar_first_index_day(df),
+                    start_d,
+                )
+                df_max = ticker.history(period="max", auto_adjust=True, actions=False)
+                df_max = self._squash_multilevel_columns(df_max)
+                if df_max is not None and not df_max.empty:
+                    clipped = self._clip_to_calendar_range(df_max, start_d, end_d)
+                    first_range = self._calendar_first_index_day(df)
+                    first_clip = self._calendar_first_index_day(clipped)
+                    if (
+                        not clipped.empty
+                        and first_clip is not None
+                        and (first_range is None or first_clip < first_range or len(clipped) > len(df))
+                    ):
+                        df = clipped
+                        logger.info(
+                            "Yahoo period=max repaired index history for %s (%d rows in window)",
+                            index_symbol,
+                            len(df),
+                        )
+
+            df["Return"] = df["Close"].pct_change()
+            df.index.name = "Date"
 
             logger.info(f"Fetched {len(df)} index rows from Yahoo")
             return df

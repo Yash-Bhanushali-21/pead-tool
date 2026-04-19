@@ -11,13 +11,13 @@ from typing import Any, List, Literal, Optional
 
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from src.agent.announcements import get_latest_announcement_date
 from src.agent.serialize import compact_pead_for_llm
 from src.analysis.pead_analyzer import PEADAnalyzer
-from src.config.config import config
+from src.config.config import CONFIG, config
 from src.news.layer import run_news_sentiment_layer
+from src.equity_research_pipeline.full_run_steps import EQUITY_PIPELINE_STAGE_IDS
 from src.tools.executions import (
     execute_document_pdf,
     execute_execution_snapshot,
@@ -55,8 +55,15 @@ def tools_config() -> dict[str, Any]:
         "news": {
             "lookback_days_default": config.NEWS_LOOKBACK_DAYS,
             "max_articles_default": config.NEWS_MAX_ARTICLES,
-            "max_scrape_default": 25,
+            "max_scrape_default": int(CONFIG.get("NEWS_BODY_SCRAPE_DEFAULT", 32)),
             "openai_news_model": config.OPENAI_NEWS_MODEL,
+            "extra_rss_feeds_configured": len(CONFIG.get("NEWS_EXTRA_RSS_FEEDS") or []),
+            "news_ai_digest_enabled": bool(CONFIG.get("NEWS_AI_DIGEST_ENABLED", True)),
+            "openai_news_digest_model": CONFIG.get("OPENAI_NEWS_DIGEST_MODEL"),
+            "newsapi_configured": bool((CONFIG.get("NEWSAPI_API_KEY") or "").strip()),
+            "news_google_chunk_threshold_days": CONFIG.get("NEWS_GOOGLE_CHUNK_THRESHOLD_DAYS", 90),
+            "news_html_discovery_enabled": bool(CONFIG.get("NEWS_HTML_DISCOVERY_ENABLED", True)),
+            "news_html_discovery_max_total": int(CONFIG.get("NEWS_HTML_DISCOVERY_MAX_TOTAL", 28)),
         },
         "technical": {
             "openai_tech_verdict_model": config.OPENAI_TECH_VERDICT_MODEL,
@@ -73,21 +80,85 @@ def tools_config() -> dict[str, Any]:
             "pdf_download_dir": config.PDF_DOWNLOAD_DIR,
             "cache_dir": config.CACHE_DIR,
         },
+        "equity_pipeline_stages": list(EQUITY_PIPELINE_STAGE_IDS),
     }
 
 
 class PeadSingleRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=32)
-    announcement_date: Optional[str] = Field(
-        None,
-        description="YYYY-MM-DD; omit to auto-detect latest earnings-style date",
+    range_start: str = Field(
+        ...,
+        min_length=8,
+        max_length=32,
+        description="YYYY-MM-DD inclusive start of the shared analysis window (OHLCV, technical, news).",
+    )
+    range_end: str = Field(
+        ...,
+        min_length=8,
+        max_length=32,
+        description="YYYY-MM-DD inclusive end of the shared analysis window.",
     )
     visualize: bool = True
     use_cache: bool = True
     include_news: bool = True
     news_lookback_days: Optional[int] = Field(None, ge=1, le=730)
     news_max_articles: Optional[int] = Field(None, ge=1, le=500)
+    include_desk_insight: bool = Field(
+        True,
+        description="Run research-desk LLM on consolidated bundle (requires OPENAI_API_KEY).",
+    )
+    include_market_sentiment: bool = Field(
+        True,
+        description="Broader India/market headline pass in the same window (below symbol news).",
+    )
+    market_sentiment_max_articles: int = Field(40, ge=5, le=200)
+    include_symbol_news_ai_digest: bool = Field(
+        True,
+        description="When False, skips the final OpenAI ai_digest for symbol news (headline synthesis unchanged if configured).",
+    )
+    include_market_news_ai_digest: bool = Field(
+        True,
+        description="When False, skips the final OpenAI ai_digest for the market-context pass.",
+    )
     output_dir: str = Field(default_factory=lambda: str(ROOT / "output"))
+    pipeline_stages: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Run only these equity-research stage ids (canonical order preserved). "
+            "Omit or null for the full pipeline. OHLCV fetch is added automatically when needed."
+        ),
+    )
+
+    @field_validator("pipeline_stages")
+    @classmethod
+    def normalize_pipeline_stages(cls, v: Optional[List[str]]) -> Optional[List[str]]:
+        if v is None:
+            return None
+        seen: set[str] = set()
+        out: List[str] = []
+        for x in v:
+            s = str(x).strip()
+            if not s or s in seen:
+                continue
+            seen.add(s)
+            out.append(s)
+        if not out:
+            return None
+        allowed = set(EQUITY_PIPELINE_STAGE_IDS)
+        bad = [x for x in out if x not in allowed]
+        if bad:
+            raise ValueError(
+                f"Unknown pipeline_stages: {bad}. Allowed: {sorted(allowed)}"
+            )
+        return out
+
+    @model_validator(mode="after")
+    def ordered_range(self) -> "PeadSingleRequest":
+        rs = pd.to_datetime(str(self.range_start).strip()).normalize()
+        re = pd.to_datetime(str(self.range_end).strip()).normalize()
+        if rs > re:
+            raise ValueError("range_start must be on or before range_end")
+        return self
 
 
 class PeadRecentRequest(BaseModel):
@@ -104,37 +175,38 @@ def _analyzer(use_cache: bool) -> PEADAnalyzer:
     return PEADAnalyzer(use_cache=use_cache)
 
 
-def _resolve_single_date(body: PeadSingleRequest, analyzer: PEADAnalyzer) -> pd.Timestamp:
-    sym = body.symbol.strip().upper()
-    if body.announcement_date:
-        return pd.to_datetime(body.announcement_date)
-    dt = get_latest_announcement_date(sym, analyzer.data_manager)
-    if dt is None:
-        raise HTTPException(
-            status_code=422,
-            detail="Could not auto-detect announcement date; provide announcement_date (YYYY-MM-DD).",
-        )
-    return pd.Timestamp(dt)
+def _single_inclusive_range(body: PeadSingleRequest) -> tuple[datetime, datetime]:
+    rs = pd.Timestamp(str(body.range_start).strip()).normalize().to_pydatetime()
+    re0 = pd.Timestamp(str(body.range_end).strip()).normalize().to_pydatetime()
+    re = re0.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return rs, re
 
 
 @router.post("/run/single")
 async def run_single(body: PeadSingleRequest) -> dict[str, Any]:
-    """Run one symbol through the full PEAD pipeline (same as CLI single mode)."""
+    """Equity research pipeline: one inclusive ``range_start``/``range_end`` window drives OHLCV, technical, news, trade context."""
     sym = body.symbol.strip().upper()
     analyzer = _analyzer(body.use_cache)
-    ann = _resolve_single_date(body, analyzer)
+    rs, re = _single_inclusive_range(body)
     out_base = Path(body.output_dir).expanduser().resolve()
     out_base.mkdir(parents=True, exist_ok=True)
 
     def _run():
-        return analyzer.analyze_announcement(
+        return analyzer.analyze_equity_research(
             sym,
-            ann.to_pydatetime(),
+            rs,
+            re,
             visualize=body.visualize,
             output_dir=str(out_base),
             include_news=body.include_news,
             news_lookback_days=body.news_lookback_days,
             news_max_articles=body.news_max_articles,
+            include_desk_insight=body.include_desk_insight,
+            include_market_sentiment=body.include_market_sentiment,
+            market_sentiment_max_articles=body.market_sentiment_max_articles,
+            include_symbol_news_ai_digest=body.include_symbol_news_ai_digest,
+            include_market_news_ai_digest=body.include_market_news_ai_digest,
+            pipeline_stages=tuple(body.pipeline_stages) if body.pipeline_stages else None,
         )
 
     result = await asyncio.to_thread(_run)
@@ -144,7 +216,8 @@ async def run_single(body: PeadSingleRequest) -> dict[str, Any]:
         "success": result.get("success", False),
         "error": result.get("error"),
         "symbol": sym,
-        "announcement_date_used": str(ann.date()),
+        "analysis_period_start": str(rs.date()),
+        "analysis_period_end": str(re.date()),
         "output_dir": result.get("output_dir"),
         "result": compact,
     }
@@ -269,10 +342,14 @@ class NewsToolRequest(BaseModel):
         description="Fetch full article HTML for first N URLs (trafilatura)",
     )
     max_scrape: int = Field(
-        25,
+        int(CONFIG.get("NEWS_BODY_SCRAPE_DEFAULT", 32)),
         ge=0,
         le=80,
         description="Max articles to scrape for body text (0 = headlines/snippets only)",
+    )
+    include_ai_digest: bool = Field(
+        True,
+        description="When False, skips the final OpenAI ai_digest narrative (lexicon + optional headline LLM unchanged).",
     )
 
 
@@ -362,6 +439,7 @@ async def run_news_layer(body: NewsToolRequest) -> dict[str, Any]:
             end_date=end_dt,
             scrape_bodies=bool(body.scrape_bodies),
             max_scrape=int(body.max_scrape),
+            include_ai_digest=bool(body.include_ai_digest),
         )
 
     return _json_safe(await asyncio.to_thread(_run))

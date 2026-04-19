@@ -1,6 +1,11 @@
 """
 Visualization utilities for PEAD analysis
 """
+import matplotlib
+
+# Headless backend: FastAPI and other worker threads cannot use the macOS GUI backend.
+matplotlib.use("Agg")
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -242,97 +247,6 @@ class Visualizer:
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
             logger.info(f"Fundamental chart saved to {save_path}")
-        else:
-            plt.show()
-        plt.close()
-
-    def plot_technical_panel(
-        self,
-        stock_data: pd.DataFrame,
-        announcement_date: pd.Timestamp,
-        technical_data: Dict,
-        save_path: Optional[str] = None,
-    ):
-        """
-        Price + MAs, RSI, MACD histogram (aligned with TechnicalAnalyzer logic).
-        """
-        if stock_data is None or stock_data.empty:
-            logger.warning("No data for technical panel")
-            return
-
-        df = stock_data.sort_index()
-        close = df["Close"].astype(float)
-        last_meta = technical_data.get("last") or {}
-        ms = int(last_meta.get("ma_short_period") or 20)
-        ml = int(last_meta.get("ma_long_period") or 50)
-        rp = int(last_meta.get("rsi_period") or 14)
-
-        ma_s = close.rolling(ms, min_periods=2).mean()
-        ma_l = close.rolling(ml, min_periods=2).mean()
-
-        delta = close.diff()
-        gain = delta.clip(lower=0.0)
-        loss = (-delta.clip(upper=0.0))
-        avg_gain = gain.rolling(rp, min_periods=max(2, rp // 2)).mean()
-        avg_loss = loss.rolling(rp, min_periods=max(2, rp // 2)).mean()
-        rs = avg_gain / avg_loss.replace(0, np.nan)
-        rsi = 100 - (100 / (1 + rs))
-
-        ema12 = close.ewm(span=12, adjust=False).mean()
-        ema26 = close.ewm(span=26, adjust=False).mean()
-        macd = ema12 - ema26
-        sig = macd.ewm(span=9, adjust=False).mean()
-        hist = (macd - sig).fillna(0.0)
-
-        fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
-        ax1, ax2, ax3 = axes
-
-        ax1.plot(df.index, close, label="Close", color="black", linewidth=1.2)
-        ax1.plot(df.index, ma_s, label=f"MA{ms}", alpha=0.8)
-        ax1.plot(df.index, ma_l, label=f"MA{ml}", alpha=0.8)
-        ax1.axvline(announcement_date, color="red", linestyle="--", alpha=0.6, label="Event")
-        ax1.set_ylabel("Price")
-        ax1.legend(loc="upper left", fontsize=8)
-        ax1.set_title("Technical context (sample window)", fontweight="bold")
-        ax1.grid(True, alpha=0.3)
-
-        ax2.plot(df.index, rsi, color="purple", linewidth=1.0)
-        ax2.axhline(70, color="gray", linestyle=":", alpha=0.5)
-        ax2.axhline(30, color="gray", linestyle=":", alpha=0.5)
-        ax2.axvline(announcement_date, color="red", linestyle="--", alpha=0.6)
-        ax2.set_ylabel(f"RSI({rp})")
-        ax2.set_ylim(0, 100)
-        ax2.grid(True, alpha=0.3)
-
-        ax3.fill_between(
-            df.index,
-            0,
-            hist,
-            where=(hist >= 0),
-            color="#2ecc71",
-            alpha=0.35,
-            interpolate=True,
-        )
-        ax3.fill_between(
-            df.index,
-            0,
-            hist,
-            where=(hist < 0),
-            color="#e74c3c",
-            alpha=0.35,
-            interpolate=True,
-        )
-        ax3.plot(df.index, hist, color="black", linewidth=0.9, alpha=0.7)
-        ax3.axhline(0, color="black", linewidth=0.5)
-        ax3.axvline(announcement_date, color="red", linestyle="--", alpha=0.6)
-        ax3.set_ylabel("MACD hist")
-        ax3.set_xlabel("Date")
-        ax3.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        if save_path:
-            plt.savefig(save_path, dpi=300, bbox_inches="tight")
-            logger.info(f"Technical panel saved to {save_path}")
         else:
             plt.show()
         plt.close()

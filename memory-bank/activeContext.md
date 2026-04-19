@@ -1,12 +1,12 @@
 # Active context
 
-**Last reviewed:** 2026-04-12 (full Memory Bank pass — user: “update memory bank”)
+**Last reviewed:** 2026-04-19 (news layer + Memory Bank — user: document achievements / remaining work)
 
 ## Current focus
 
 - **Memory Bank** is the structured brain: `memory-bank/*.md` + `.cursor/rules/memory-bank.mdc` (always apply).
-- **News research:** Optional **full-article scrape** (`trafilatura`) in a configurable date window; per-URL metadata; aggregate **bullish / bearish / neutral** media stance + `per_article` breakdown (research-only).
-- **Chat UI:** Session history sidebar (drawer mobile, collapsible rail desktop), stick-to-bottom scroll, **plain text while streaming** → **Markdown** after (`MarkdownContent`: react-markdown, remark-gfm, typography). App layout uses flex + `min-h-0` so the thread scrolls inside the viewport.
+- **News research:** Headline collection (RSS, Bing, DDG-lite, HTML discovery, etc.), optional **full-article scrape** (`trafilatura`), TextBlob + optional OpenAI headline synthesis, optional final **`ai_digest`** narrative; citations persisted to SQLite (`news_article_citations`). **Equity single tool** exposes testing toggles for `ai_digest` per pass.
+- **Chat UI:** Session history sidebar, stick-to-bottom scroll, plain text while streaming → Markdown after. App layout uses flex + `min-h-0`.
 - **README / changelog:** `PROJECT_MEMORY.md` **Current snapshot** + **Change log**; sync to README via `scripts/sync_memory_readme.py`.
 
 ## Session continuity (for agents)
@@ -20,13 +20,17 @@
 - Chat persistence: `CHAT_SQLITE_PATH`; `/api/chat/sessions` for list + history.
 - Time: `src/utils/time_compat.py` (naive UTC) to avoid pandas tz crashes.
 - Trade readiness: `src/trade_context/` blended into synthesis when present; research-only disclaimers.
+- **News `ai_digest`:** Gated by `include_symbol_news_ai_digest` / `include_market_news_ai_digest` on equity research options and `PeadSingleRequest`; `include_ai_digest` on `NewsToolRequest` (`POST /api/tools/run/news`); agent tool `run_news_and_sentiment` accepts `include_ai_digest`. When skipped, payload includes `ai_digest_skipped_by_request` for UI copy.
+- **Article preview / citations list:** `build_article_preview_rows` (`src/news/article_preview.py`) orders **dated articles (newest first) then undated** (dedupe by URL) so HTML discovery and other undated hits are not dropped when preview cap is tight after lexicographic sort by `published`.
 
-## Next steps (when relevant)
+## Next steps (deferred — pick up later)
 
-- **Fix news research tool:** user reported it does not work as expected (citations DB / UI / scrape path). See `progress.md` → Known gaps for file list and checks.
+- **Verify end-to-end:** Long window + symbol known to yield `html_discovery` rows; confirm they appear in `articles_preview`, `per_article`, and SQLite citations UI/API (`GET /api/news/articles` if used).
+- **News + citations “still broken” reports:** If any remain, reproduce with checklist in `progress.md` (SQLite path, `fetched_date` UTC vs UI filter, `persisted_citations`, scrape failures).
+- **Standalone News tool UI:** Backend supports `include_ai_digest` on `/api/tools/run/news`; there is **no** dedicated `NewsToolPage.tsx` in repo today — add checkboxes there if a standalone page is introduced or linked from `/tools`.
 - After milestones: bump `progress.md`, append `PROJECT_MEMORY.md` change log, run `sync_memory_readme.py` if snapshot changes.
 - Optional: code-split heavy chat client deps if bundle size hurts.
 
 ## Open questions
 
-- (Track in `progress.md` / `PROJECT_MEMORY.md` backlog.)
+- Whether to also gate **`_llm_synthesis`** (headline JSON pass) independently from **`ai_digest`** — currently only the final digest is toggled; headline LLM remains when API key is set.

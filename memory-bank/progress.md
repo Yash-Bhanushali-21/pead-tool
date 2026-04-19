@@ -7,10 +7,18 @@
 - Web: Chat (`/`) with SSE streaming, Markdown after stream, session sidebar, mobile drawer + desktop collapse, scroll tuned for streaming + “Jump to latest”.
 - Tools hub and tool pages under `/tools`.
 - **Docs / process:** `memory-bank/` (six core files), `PROJECT_MEMORY.md` (changelog + README snapshot source), `scripts/sync_memory_readme.py`, `.cursor/rules/memory-bank.mdc`.
+- **News / sentiment (2026-04-19 milestone):**
+  - **Final OpenAI `ai_digest`** can be turned off for testing: `EquityResearchRunOptions.include_symbol_news_ai_digest` / `include_market_news_ai_digest`, threaded through `PEADAnalyzer.analyze_equity_research`, `full_run_steps`, `PeadSingleRequest` + `POST /api/tools/run/single`, and **`NewsToolRequest`** for `POST /api/tools/run/news`. Agent tool `run_news_and_sentiment` accepts `include_ai_digest`.
+  - **Web:** `PeadSingleToolPage.tsx` — two checkboxes for symbol vs market `ai_digest`; `PeadSingleResultView.tsx` distinguishes **request-skipped** vs **key/config/error** skips via `ai_digest_skipped_by_request`.
+  - **`articles_preview`:** Built with `build_article_preview_rows` in `src/news/article_preview.py` (dated newest-first, then undated, URL dedupe) so **HTML discovery** and other undated articles are not silently truncated off the preview list.
+  - **`per_article` default cap** increased (lexicon rows for more articles) in `src/news/sentiment_pipeline.py`.
+  - **Citations DB:** `persist_fetch` enriches `metadata_json` with `collector_source` and `body_scrape_present` (`src/persistence/sqlite_news_articles.py`).
 
 ## Known gaps / backlog
 
-- **News + citations tool — needs fix (user report: not working as expected).** Next pass: reproduce (`/tools` → News + sentiment, `/api/tools/run/news`, `GET /api/news/articles`), verify SQLite `news_article_citations` writes + UTC `fetched_date` vs UI filter, proxy/CORS, `persisted_citations` in response, trafilatura failures. Touch: `src/news/layer.py`, `src/persistence/sqlite_news_articles.py`, `server/news_routes.py`, `web/src/pages/tools/NewsToolPage.tsx`.
+- **News + citations — follow-up verification:** Re-run a symbol/window rich in RSS + HTML discovery; confirm `articles_preview`, `per_article`, `persisted_citations`, and any **citations browser** (`GET /api/news/articles`, UTC `fetched_date` filter vs UI) behave as expected. Touch points if issues persist: `src/news/layer.py`, `src/news/collector.py`, `src/persistence/sqlite_news_articles.py`, `server/news_routes.py` (if present), web citations consumer.
+- **Standalone News UI:** API supports `include_ai_digest`; no dedicated news-only React page in repo — add UI when/if `/tools/news` (or similar) ships.
+- **Optional product knob:** Independent toggle for headline **`_llm_synthesis`** vs **`ai_digest`** (only digest is gated today).
 - Open items: see `activeContext.md` and `PROJECT_MEMORY.md` → Open questions.
 - Large JS bundle on chat route (markdown stack); optional code-splitting later.
 
@@ -20,6 +28,7 @@ Canonical table: **`PROJECT_MEMORY.md` → Change log** (append-only, newest fir
 
 | Date (UTC) | Note |
 |------------|------|
+| 2026-04-19 | News: `ai_digest` toggles (equity single + API + agent); preview ordering for undated/HTML discovery; citation metadata flags; Memory Bank + `PROJECT_MEMORY` updated. |
 | 2026-04-12 | Full Memory Bank review; `activeContext` + `progress` refreshed; documented **session continuity** (read `memory-bank/*.md` at task start; `@` mention when user wants guaranteed load). |
 | 2026-04-11 | Memory Bank workflow introduced; `memory-bank.mdc`; merged old `00-project-memory.mdc`. |
 

@@ -26,6 +26,24 @@ def _json_line(obj: Dict[str, Any]) -> str:
     return json.dumps(obj, default=str, ensure_ascii=False) + "\n"
 
 
+def augment_latest_user_message(
+    messages: List[Dict[str, str]],
+    memory_block: Optional[str],
+) -> List[Dict[str, str]]:
+    """
+    Prepend Mem0 (or similar) context to the latest user message only.
+    Keeps a clear delimiter so the model can separate retrieved notes from the user ask.
+    """
+    if not memory_block or not messages:
+        return messages
+    out: List[Dict[str, str]] = [dict(m) for m in messages]
+    last = dict(out[-1])
+    base = (last.get("content") or "").strip()
+    last["content"] = f"{memory_block}\n\n---\n\nUser message:\n{base}"
+    out[-1] = last
+    return out
+
+
 def chat_messages_to_history(
     messages: List[Dict[str, str]],
 ) -> tuple[Optional[List[ModelMessage]], str]:

@@ -23,7 +23,17 @@ from typing import List, Literal, Optional
 
 from src.agent.agents import build_coordinator_agent, build_synthesis_agent
 from src.agent.deps import ResearchDeps
-from src.agent.streaming import chat_messages_to_history, stream_research_chat
+from src.agent.streaming import (
+    augment_latest_user_message,
+    chat_messages_to_history,
+    stream_research_chat,
+)
+from src.integrations.mem0_service import (
+    format_mem0_block,
+    mem0_add_turn,
+    mem0_runtime_enabled,
+    resolve_mem0_user_id,
+)
 from src.analysis.pead_analyzer import PEADAnalyzer
 from src.config.config import CONFIG, config
 from src.persistence.sqlite_chat import ChatStore, accumulate_stream_line
@@ -48,6 +58,14 @@ class ChatRequest(BaseModel):
     persist: bool = Field(
         True,
         description="If true and CHAT_PERSIST_ENABLED, store this turn in SQLite.",
+    )
+    mem0_user_id: Optional[str] = Field(
+        None,
+        description="Stable Mem0 user id (overrides session_id for memory scope). See MEM0_* env.",
+    )
+    use_mem0: bool = Field(
+        True,
+        description="If false, skip Mem0 retrieve/add for this request (when MEM0_ENABLED).",
     )
 
 
@@ -84,6 +102,8 @@ def health():
         "chat_persist_enabled": CONFIG.get("CHAT_PERSIST_ENABLED", True),
         "chat_sqlite_path": CONFIG.get("CHAT_SQLITE_PATH"),
         "news_sqlite_path": CONFIG.get("NEWS_SQLITE_PATH") or CONFIG.get("CHAT_SQLITE_PATH"),
+        "mem0_enabled": bool(CONFIG.get("MEM0_ENABLED", False)),
+        "mem0_runtime": mem0_runtime_enabled(),
     }
 
 
@@ -95,6 +115,7 @@ async def chat_stream(body: ChatRequest, request: Request):
             detail="OPENAI_API_KEY is not set; the agent requires it for PydanticAI models.",
         )
     msgs = [m.model_dump() for m in body.messages]
+    user_plain = (msgs[-1].get("content") or "").strip()
     out_base = ROOT / "output" / config.AGENT_OUTPUT_SUBDIR
     out_base.mkdir(parents=True, exist_ok=True)
 
@@ -109,11 +130,16 @@ async def chat_stream(body: ChatRequest, request: Request):
     session_id: Optional[str] = sid_raw
     if persist:
         session_id = sid_raw or str(uuid.uuid4())
+    mem0_uid = resolve_mem0_user_id(body.mem0_user_id, session_id)
+    mem_block: Optional[str] = None
+    if body.use_mem0 and mem0_runtime_enabled():
+        mem_block = await asyncio.to_thread(format_mem0_block, mem0_uid, user_plain)
+    msgs_for_agent = augment_latest_user_message(msgs, mem_block)
+
     turn_id: Optional[int] = None
     if persist and session_id:
         store.ensure_session(session_id, source="chat")
-        user_text = (msgs[-1].get("content") or "").strip()
-        turn_id = store.append_turn_user(session_id, user_text)
+        turn_id = store.append_turn_user(session_id, user_plain)
 
     async def event_stream():
         text_parts: list[str] = []
@@ -127,7 +153,7 @@ async def chat_stream(body: ChatRequest, request: Request):
 
             async for line in stream_research_chat(
                 deps=deps,
-                messages=msgs,
+                messages=msgs_for_agent,
                 coordinator_model=body.coordinator_model or config.AGENT_MODEL,
                 synthesis_model=body.synthesis_model or config.AGENT_SYNTHESIS_MODEL,
             ):
@@ -159,6 +185,16 @@ async def chat_stream(body: ChatRequest, request: Request):
                         error=err_holder[0],
                     )
                 await asyncio.to_thread(_complete)
+            if (
+                body.use_mem0
+                and mem0_runtime_enabled()
+                and mem0_uid
+                and user_plain
+                and (final_done[0] or ("".join(text_parts) if text_parts else ""))
+            ):
+                at = final_done[0] if final_done[0] is not None else "".join(text_parts)
+                if at and not err_holder[0]:
+                    await asyncio.to_thread(mem0_add_turn, mem0_uid, user_plain, at)
 
     return StreamingResponse(
         event_stream(),
@@ -184,18 +220,28 @@ async def chat_complete(body: ChatRequest, request: Request):
     coord = build_coordinator_agent(
         synth, model=body.coordinator_model or config.AGENT_MODEL
     )
-    hist, user_prompt = chat_messages_to_history([m.model_dump() for m in body.messages])
-    result = await coord.run(user_prompt, message_history=hist, deps=deps)
-    out_text = result.output if isinstance(result.output, str) else str(result.output)
-
+    raw_msgs = [m.model_dump() for m in body.messages]
+    user_plain = (raw_msgs[-1].get("content") or "").strip()
     persist = bool(body.persist and CONFIG.get("CHAT_PERSIST_ENABLED", True))
     sid = (body.session_id or "").strip() or None
     if persist:
         sid = sid or str(uuid.uuid4())
+    mem0_uid = resolve_mem0_user_id(body.mem0_user_id, sid)
+    mem_block: Optional[str] = None
+    if body.use_mem0 and mem0_runtime_enabled():
+        mem_block = await asyncio.to_thread(format_mem0_block, mem0_uid, user_plain)
+    raw_aug = augment_latest_user_message(raw_msgs, mem_block)
+    hist, user_prompt = chat_messages_to_history(raw_aug)
+    result = await coord.run(user_prompt, message_history=hist, deps=deps)
+    out_text = result.output if isinstance(result.output, str) else str(result.output)
+
+    if persist and sid:
         store: ChatStore = request.app.state.chat_store
         store.ensure_session(sid, source="chat")
-        user_text = (body.messages[-1].content or "").strip()
-        store.insert_complete_turn(sid, user_text, out_text)
+        store.insert_complete_turn(sid, user_plain, out_text)
+
+    if body.use_mem0 and mem0_runtime_enabled() and mem0_uid and user_plain and out_text.strip():
+        await asyncio.to_thread(mem0_add_turn, mem0_uid, user_plain, out_text)
 
     resp: dict = {"role": "assistant", "content": out_text}
     if persist and sid:

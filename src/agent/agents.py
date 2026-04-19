@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -40,7 +39,7 @@ COORDINATOR_INSTRUCTIONS = """You are the lead equity research coordinator for I
 | Fundamentals / screening / ratios / Yahoo bundle | `run_fundamentals_screening` | Symbol only |
 | Technicals (RSI, MACD, MAs, pivots) | `run_technical_snapshot` | Defaults: PEAD event window, auto announcement date, include_chart on |
 | News & sentiment headlines | `run_news_and_sentiment` | Defaults: ~90d lookback, 80 articles |
-| Full PEAD + CAR + everything heavy | `run_full_pead_pipeline` | Optional announcement_date |
+| Equity research bundle (+ optional desk LLM) | `run_full_pead_pipeline` | **range_start**, **range_end**; optional **include_desk_insight**, **include_market_sentiment** (defaults true) |
 | CARs + component scores only | `run_scoring_only_stack` | Optional announcement_date (else auto) |
 | Trade readiness pillars (isolated) | `run_trade_readiness_tool` | lookback_days default 200 |
 | Full execution / tape context JSON | `get_execution_context_snapshot` | Same as Tools → execution snapshot |
@@ -53,7 +52,7 @@ COORDINATOR_INSTRUCTIONS = """You are the lead equity research coordinator for I
 - If the request is **ambiguous** (which symbol? which tool? missing PDF date?) or would **start an expensive run** without a clear symbol, **do not** call the tool yet. Reply with one short clarifying question.
 - When you need the user to confirm a specific run, end your message with **exactly one** line containing this HTML comment (valid JSON inside):
   `<!--TOOL_CONFIRM:{"tool":"<id>","args":{...},"label":"short human label"}-->`
-  `<id>` must be one of: run_fundamentals_screening, run_technical_snapshot, run_scoring_only_stack, run_trade_readiness_tool, run_document_pdf_parse, run_recent_nse_announcements, run_news_and_sentiment, run_full_pead_pipeline, get_execution_context_snapshot, get_yahoo_calendar_snippet. Put all parameters needed to run the tool in `args` (e.g. {"symbol":"RELIANCE"}).
+  `<id>` must be one of: run_fundamentals_screening, run_technical_snapshot, run_scoring_only_stack, run_trade_readiness_tool, run_document_pdf_parse, run_recent_nse_announcements, run_news_and_sentiment, run_full_pead_pipeline, get_execution_context_snapshot, get_yahoo_calendar_snippet. Put all parameters needed to run the tool in `args` (e.g. {"symbol":"RELIANCE","range_start":"2025-10-01","range_end":"2026-04-17"} for the equity bundle).
 - When the user replies **yes / y / sure / ok / confirm / go ahead / proceed** right after such a prompt (or clearly confirms), **call the tool** immediately with those args. If they say no, do not run it.
 
 ## News verdict workflow
@@ -147,8 +146,9 @@ def build_coordinator_agent(
         lookback_days: int = 90,
         max_articles: int = 80,
         scrape_bodies: bool = True,
-        max_scrape: int = 25,
+        max_scrape: int = 32,
         end_date_iso: Optional[str] = None,
+        include_ai_digest: bool = True,
     ) -> str:
         """
         Yahoo + Google News RSS, optional **full article scrape** (first ``max_scrape`` URLs via trafilatura),
@@ -174,6 +174,7 @@ def build_coordinator_agent(
                 end_date=end_dt,
                 scrape_bodies=bool(scrape_bodies),
                 max_scrape=int(max_scrape),
+                include_ai_digest=bool(include_ai_digest),
             )
 
         loop = asyncio.get_running_loop()
@@ -184,40 +185,51 @@ def build_coordinator_agent(
     async def run_full_pead_pipeline(
         ctx: RunContext[ResearchDeps],
         symbol: str,
-        announcement_date: Optional[str] = None,
+        range_start: str,
+        range_end: str,
         include_news: bool = True,
         generate_charts: bool = False,
+        include_desk_insight: bool = True,
+        include_market_sentiment: bool = True,
     ) -> str:
         """
-        Run the full PEAD study: event model, CARs, fundamentals, technicals, optional news sentiment, research brief.
-        announcement_date: optional ISO date (YYYY-MM-DD); if omitted, auto-detects latest earnings date.
-        Set generate_charts true only if the user explicitly wants image files (slower).
+        Run the equity research bundle: fundamentals + technicals (Tools paths) + optional news + trade context.
+
+        ``range_start`` / ``range_end`` are YYYY-MM-DD inclusive — the **same** calendar window is used
+        for OHLCV fetch, technical (including chart payload), news article filtering, and trade-context
+        price input. Fundamentals remain a company snapshot (not day-by-day over the range).
+
+        Set ``generate_charts`` true only if the user explicitly wants image files (slower).
+        ``include_desk_insight`` runs the consolidated research-desk LLM step (requires API key).
+        ``include_market_sentiment`` adds a broader India/market headline pass in the same window.
         """
         sym = symbol.strip().upper()
-        ann: Optional[datetime] = None
-        if announcement_date:
-            ann = pd.to_datetime(announcement_date).to_pydatetime()
-        else:
-            ann_raw = get_latest_announcement_date(sym, ctx.deps.analyzer.data_manager)
-            if ann_raw is None:
-                return json_dumps_safe(
-                    {
-                        "success": False,
-                        "error": "No announcement date provided and auto-detection failed.",
-                    }
-                )
-            ann = pd.Timestamp(ann_raw).to_pydatetime()
+        try:
+            rs = pd.Timestamp(str(range_start).strip()).normalize().to_pydatetime()
+            re0 = pd.Timestamp(str(range_end).strip()).normalize().to_pydatetime()
+            re = re0.replace(hour=23, minute=59, second=59, microsecond=999999)
+        except Exception as e:
+            return json_dumps_safe(
+                {"success": False, "error": f"Invalid range_start/range_end: {e}"}
+            )
+        if rs > re0:
+            return json_dumps_safe(
+                {"success": False, "error": "range_start must be on or before range_end."}
+            )
 
         out_dir = str(ctx.deps.output_base)
 
         def _run():
-            return ctx.deps.analyzer.analyze_announcement(
+            return ctx.deps.analyzer.analyze_equity_research(
                 sym,
-                ann,
+                rs,
+                re,
                 visualize=generate_charts,
                 output_dir=out_dir,
                 include_news=include_news,
                 news_lookback_days=config.NEWS_LOOKBACK_DAYS,
+                include_desk_insight=include_desk_insight,
+                include_market_sentiment=include_market_sentiment,
             )
 
         loop = asyncio.get_running_loop()

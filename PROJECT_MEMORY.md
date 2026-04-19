@@ -11,7 +11,7 @@
 ## Current snapshot
 
 - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
-- **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance in API/UI (`/api/tools/run/news`).
+- **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance; optional final OpenAI **`ai_digest`** (toggle per run on equity single + `/api/tools/run/news` + agent tool). **`articles_preview`** uses dated-then-undated ordering so HTML discovery / undated rows are not dropped under tight preview caps; citations rows carry **`collector_source`** / **`body_scrape_present`** in metadata.
 - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
 - **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
 - **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.
@@ -33,6 +33,7 @@
 
 | Date (UTC) | Area | Summary |
 |------------|------|---------|
+| 2026-04-19 | News / docs | **`ai_digest` toggles** (symbol + market) on equity research + `PeadSingleRequest`; `include_ai_digest` on `NewsToolRequest`; agent `run_news_and_sentiment`; UI checkboxes on single-symbol tool + `ai_digest_skipped_by_request` messaging. **`articles_preview`** via `build_article_preview_rows` (dated then undated, URL dedupe). **`per_article`** lexicon cap raised. Citations **`metadata_json`**: `collector_source`, `body_scrape_present`. Memory Bank + this snapshot updated; **E2E citations UI** verification deferred. |
 | 2026-04-12 | News / UX | User report: news + **citations tool not working as expected** — logged in `memory-bank/progress.md` for follow-up (repro, SQLite, UTC filter, API). |
 | 2026-04-12 | News | Article **web scraping** (trafilatura) for first N URLs; **metadata** (hostname, author, date, word count); **bullish/bearish/neutral** aggregate (`stock_media_stance`, `per_article`); Google RSS query fixed (removed stray symbol); News tool API/UI: `end_date`, `scrape_bodies`, `max_scrape`. |
 | 2026-04-11 | Cursor / docs | Introduced **Memory Bank** (`memory-bank/*.md`), always-apply rule `.cursor/rules/memory-bank.mdc`; retired `00-project-memory.mdc` (merged into Memory Bank rule). |
@@ -46,7 +47,8 @@
 
 ## Open questions / backlog
 
-- **News + citations:** Tool reported **not working as expected** — debug next session (API persist, `GET /api/news/articles`, UTC date filter vs UI, SQLite path). Details in `memory-bank/progress.md`.
+- **News + citations:** Re-verify with a repro run (RSS + HTML discovery mix): `articles_preview`, `per_article`, `persisted_citations`, citations list API + UTC `fetched_date` vs UI. Prior “not working” report partially addressed by preview ordering + metadata; remaining issues tracked in **`memory-bank/progress.md`**.
+- **Optional:** Standalone news tool page UI for `include_ai_digest` (API already supports). Optional separate toggle for headline **`_llm_synthesis`** vs **`ai_digest`**.
 
 ---
 

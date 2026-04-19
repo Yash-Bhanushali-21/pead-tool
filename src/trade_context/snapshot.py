@@ -16,20 +16,19 @@ def build_light_results_for_trade_context(
     symbol: str,
     stock_data: pd.DataFrame,
 ) -> Dict[str, Any]:
-    """Minimal ``results`` shape for :func:`compute_trade_context`."""
+    """
+    Minimal ``results`` for :func:`compute_trade_context` — **no synthetic PEAD/fundamental/news**.
+
+    Trade context pillars that need missing inputs (e.g. alignment, model fit without R²) will
+    surface as ``null`` with reasons in :func:`compute_trade_context`.
+    """
     end = stock_data.index.max()
     if hasattr(end, "to_pydatetime"):
         end_ts = pd.Timestamp(end)
     else:
         end_ts = pd.Timestamp(end)
     ta = TechnicalAnalyzer().analyze(stock_data, end_ts, symbol=symbol)
-    return {
-        "composite_score": {"rating": "HOLD", "data_quality": {}},
-        "fundamental_analysis": {"stance": "not run — use full PEAD for fundamentals"},
-        "technical_analysis": ta,
-        "news_sentiment": None,
-        "market_model": {"beta": None, "r_squared": None},
-    }
+    return {"technical_analysis": ta}
 
 
 def fetch_light_trade_context(
@@ -59,6 +58,8 @@ def fetch_light_trade_context(
         "symbol": sym,
         "trade_context": tc,
         "technical_analysis": results["technical_analysis"],
-        "note": f"Fundamentals/news/PEAD omitted — price window ~{lookback_calendar_days}d. "
-        "Use run_full_pead_pipeline for unified desk view.",
+        "note": (
+            f"Price-only window ~{lookback_calendar_days}d calendar + technicals. "
+            "No fabricated fundamentals/news/PEAD inputs; see trade_context.missing_pillars for gaps."
+        ),
     }

@@ -14,14 +14,14 @@ import pandas as pd
 # --- Scoring helpers (transparent, documented bands) ---
 
 
-def _liquidity_score(volume: pd.Series) -> Tuple[float, Dict[str, Any]]:
-    """0–100: recent volume vs 20d mean; penalize extreme thinness."""
+def _liquidity_score(volume: pd.Series) -> Tuple[Optional[float], Dict[str, Any]]:
+    """0–100: recent volume vs 20d mean; penalize extreme thinness. None if data insufficient."""
     meta: Dict[str, Any] = {}
     if volume is None or len(volume) < 21:
-        return 50.0, {"note": "insufficient volume history", "volume_ratio_recent_vs_20d": None}
+        return None, {"reason": "insufficient_volume_history", "volume_ratio_recent_vs_20d": None}
     v = volume.astype(float).replace(0, np.nan).dropna()
     if len(v) < 21:
-        return 50.0, {"note": "sparse volume", "volume_ratio_recent_vs_20d": None}
+        return None, {"reason": "sparse_volume", "volume_ratio_recent_vs_20d": None}
     ma20 = v.rolling(20, min_periods=10).mean().iloc[-1]
     recent5 = v.iloc[-5:].mean()
     ratio = float(recent5 / ma20) if ma20 and ma20 > 0 else 1.0
@@ -42,23 +42,26 @@ def _liquidity_score(volume: pd.Series) -> Tuple[float, Dict[str, Any]]:
     return float(np.clip(score, 0.0, 100.0)), meta
 
 
-def _volatility_execution_score(atr_pct: Optional[float], beta: Optional[float]) -> Tuple[float, Dict[str, Any]]:
+def _volatility_execution_score(atr_pct: Optional[float], beta: Optional[float]) -> Tuple[Optional[float], Dict[str, Any]]:
     """
     0–100: favor moderate vol for controlled execution; penalize extreme ATR% and very high beta.
+    None if ATR% is unavailable (no synthetic neutral).
     """
     meta: Dict[str, Any] = {"atr_pct": atr_pct, "beta": beta}
+    if atr_pct is None or not np.isfinite(atr_pct):
+        meta["reason"] = "atr_pct_unavailable"
+        return None, meta
     s = 70.0
-    if atr_pct is not None and np.isfinite(atr_pct):
-        # 1% ATR ~ easy; 5%+ ~ harsh for tight stops
-        if atr_pct <= 0.015:
-            s = 85.0
-        elif atr_pct <= 0.03:
-            s = 72.0
-        elif atr_pct <= 0.045:
-            s = 55.0
-        else:
-            s = 38.0
-        meta["atr_band"] = "low" if atr_pct <= 0.02 else "moderate" if atr_pct <= 0.035 else "elevated"
+    # 1% ATR ~ easy; 5%+ ~ harsh for tight stops
+    if atr_pct <= 0.015:
+        s = 85.0
+    elif atr_pct <= 0.03:
+        s = 72.0
+    elif atr_pct <= 0.045:
+        s = 55.0
+    else:
+        s = 38.0
+    meta["atr_band"] = "low" if atr_pct <= 0.02 else "moderate" if atr_pct <= 0.035 else "elevated"
     if beta is not None and np.isfinite(beta):
         abs_b = abs(float(beta))
         if abs_b > 1.35:
@@ -74,8 +77,13 @@ def _alignment_score(
     tech_stance: str,
     fund_stance: str,
     news_score: Optional[float],
-) -> Tuple[float, Dict[str, Any]]:
-    """Rough agreement across lenses → 0–100."""
+) -> Tuple[Optional[float], Dict[str, Any]]:
+    """
+    Rough agreement across lenses → 0–100, or None if inputs are too thin to score honestly.
+
+    Requires at least two non-neutral directional votes (from PEAD rating, technical stance,
+    fundamentals stance, or news score bands).
+    """
     def sign_pead(r: str) -> int:
         u = (r or "").upper()
         if "STRONG BUY" in u or "BUY" in u.split():
@@ -96,12 +104,17 @@ def _alignment_score(
     a2 = sign_text(tech_stance)
     a3 = sign_text(fund_stance)
     a4 = 0
-    if news_score is not None:
-        a4 = 1 if news_score > 58 else (-1 if news_score < 42 else 0)
+    if news_score is not None and np.isfinite(float(news_score)):
+        ns = float(news_score)
+        a4 = 1 if ns > 58 else (-1 if ns < 42 else 0)
     votes = [a1, a2, a3, a4]
     non_zero = [v for v in votes if v != 0]
-    if not non_zero:
-        return 50.0, {"alignment": "mixed_or_neutral", "votes": votes}
+    if len(non_zero) < 2:
+        return None, {
+            "alignment": "insufficient_inputs",
+            "votes": votes,
+            "reason": "need_at_least_two_directional_signals_across_lenses",
+        }
     agree = len(set(non_zero)) == 1
     strength = len(non_zero)
     if agree:
@@ -110,9 +123,9 @@ def _alignment_score(
     return 38.0, {"alignment": "conflicting_signals", "votes": votes}
 
 
-def _model_fit_score(r_squared: Optional[float]) -> float:
+def _model_fit_score(r_squared: Optional[float]) -> Optional[float]:
     if r_squared is None or not np.isfinite(r_squared):
-        return 50.0
+        return None
     r2 = float(r_squared)
     if r2 >= 0.18:
         return 78.0
@@ -127,7 +140,8 @@ def compute_trade_context(results: Dict[str, Any], stock_data: pd.DataFrame) -> 
     """
     Build execution-context block from a populated analyzer ``results`` and price ``stock_data``.
 
-    Returns a dict stored as ``results['trade_context']`` and fed into synthesis.
+    Missing inputs produce ``null`` pillar scores (no neutral synthetic fill). The headline
+    ``trade_readiness_score_0_100`` is ``null`` unless **all** four pillars are computable.
     """
     vol_series = stock_data["Volume"] if stock_data is not None and "Volume" in stock_data.columns else None
     liq_score, liq_meta = _liquidity_score(vol_series if vol_series is not None else pd.Series(dtype=float))
@@ -149,8 +163,11 @@ def compute_trade_context(results: Dict[str, Any], stock_data: pd.DataFrame) -> 
     fa = results.get("fundamental_analysis") or {}
     ns = results.get("news_sentiment") or {}
     news_total = ns.get("news_score_0_100") if isinstance(ns, dict) else None
-    if news_total is not None:
-        news_total = float(news_total)
+    if news_total is not None and not (isinstance(news_total, float) and np.isnan(news_total)):
+        try:
+            news_total = float(news_total)
+        except (TypeError, ValueError):
+            news_total = None
 
     align_score, align_meta = _alignment_score(
         rating,
@@ -164,15 +181,31 @@ def compute_trade_context(results: Dict[str, Any], stock_data: pd.DataFrame) -> 
         r2 = (comp.get("data_quality") or {}).get("r_squared")
     fit_score = _model_fit_score(r2)
 
-    # Weighted readiness (explicit — adjust in one place only)
     w_liq, w_vol, w_align, w_fit = 0.28, 0.24, 0.26, 0.22
-    readiness = (
-        w_liq * liq_score
-        + w_vol * vol_exec_score
-        + w_align * align_score
-        + w_fit * fit_score
-    )
-    readiness = float(np.clip(readiness, 0.0, 100.0))
+    pillar_values = [liq_score, vol_exec_score, align_score, fit_score]
+    readiness: Optional[float]
+    if any(p is None for p in pillar_values):
+        readiness = None
+        missing_pillars = [
+            name
+            for name, p in zip(
+                ("liquidity_execution", "volatility_regime", "cross_signal_alignment", "market_model_fit"),
+                pillar_values,
+            )
+            if p is None
+        ]
+    else:
+        readiness = float(
+            np.clip(
+                w_liq * float(liq_score)
+                + w_vol * float(vol_exec_score)
+                + w_align * float(align_score)
+                + w_fit * float(fit_score),
+                0.0,
+                100.0,
+            )
+        )
+        missing_pillars = []
 
     flags: List[str] = []
     if liq_meta.get("label", "").startswith("thin"):
@@ -184,13 +217,18 @@ def compute_trade_context(results: Dict[str, Any], stock_data: pd.DataFrame) -> 
     if beta is not None and abs(beta) > 1.35:
         flags.append("Beta: elevated vs NIFTY — book moves larger than index")
 
-    return {
+    def _p(v: Optional[float]) -> Optional[float]:
+        return None if v is None else round(float(v), 1)
+
+    out: Dict[str, Any] = {
         "trade_readiness_score_0_100": readiness,
+        "readiness_complete": readiness is not None,
+        "missing_pillars": missing_pillars,
         "pillars": {
-            "liquidity_execution": round(liq_score, 1),
-            "volatility_regime": round(vol_exec_score, 1),
-            "cross_signal_alignment": round(align_score, 1),
-            "market_model_fit": round(fit_score, 1),
+            "liquidity_execution": _p(liq_score),
+            "volatility_regime": _p(vol_exec_score),
+            "cross_signal_alignment": _p(align_score),
+            "market_model_fit": _p(fit_score),
         },
         "liquidity_detail": liq_meta,
         "volatility_detail": vol_meta,
@@ -201,3 +239,4 @@ def compute_trade_context(results: Dict[str, Any], stock_data: pd.DataFrame) -> 
             "Execution-context screen only — not investment advice, a suitability assessment, or an order."
         ),
     }
+    return out

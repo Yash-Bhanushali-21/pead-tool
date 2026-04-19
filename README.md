@@ -4,7 +4,7 @@
 
 > **Living context:** Read all **`memory-bank/*.md`** at task start (Cursor rule `memory-bank.mdc`). Dated **change log** and README snapshot source: [`PROJECT_MEMORY.md`](PROJECT_MEMORY.md).
 > - **Memory Bank:** Durable context in `memory-bank/` (read all `.md` there at task start); Cursor rule `.cursor/rules/memory-bank.mdc` (always apply). This file remains the **change log** + **README snapshot** source.
-> - **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance in API/UI (`/api/tools/run/news`).
+> - **News layer:** Optional article **scraping** (trafilatura) + metadata; aggregate **bullish/bearish/neutral** media stance; optional final OpenAI **`ai_digest`** (toggle per run on equity single + `/api/tools/run/news` + agent tool). **`articles_preview`** uses dated-then-undated ordering so HTML discovery / undated rows are not dropped under tight preview caps; citations rows carry **`collector_source`** / **`body_scrape_present`** in metadata.
 > - **Stack:** Python PEAD pipeline (NSE/Yahoo), FastAPI (`server/`), PydanticAI agents (`src/agent/`), React + Vite + Tailwind (`web/`).
 > - **Entry:** CLI `main.py`; dev boot `./scripts/dev.sh` or `npm run dev` (repo root); UI at `/` (chat) and `/tools` (direct PEAD runs).
 > - **Config:** `src/config/settings.py`; `OPENAI_API_KEY` required for **chat agent**; `/api/tools/*` core PEAD does not require it.
@@ -92,6 +92,8 @@ The repo includes a **multi-agent** layer built with [PydanticAI](https://ai.pyd
 - **Synthesis desk agent**: second model invoked via tool when narrative polish is needed.
 
 **Requirements:** set `OPENAI_API_KEY` (used by PydanticAI model strings such as `openai:gpt-4o-mini`). Optional: `PEAD_CORS_ORIGINS` for extra dev origins (comma-separated).
+
+**Optional long-term chat memory ([Mem0](https://github.com/mem0ai/mem0)):** install deps with `pip install -r requirements.txt` (includes `mem0ai`). Set `MEM0_ENABLED=true`. Memories are scoped by chat `session_id` unless you set `MEM0_DEFAULT_USER_ID` or send `mem0_user_id` on `POST /api/chat` / `POST /api/chat/stream`. Toggle per request with `use_mem0: false`. `GET /api/health` reports `mem0_enabled` (env) and `mem0_runtime` (env + import + key).
 
 **Boot API + UI together** (from repo root; Ctrl+C stops both):
 

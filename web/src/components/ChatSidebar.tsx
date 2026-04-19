@@ -1,4 +1,5 @@
 import type { ChatTurn } from "../types";
+import { formatYmdOnly } from "../lib/formatYmd";
 
 export type SessionListItem = {
   id: string;
@@ -48,18 +49,7 @@ export function turnsToChatMessages(turns: TurnRow[]): ChatTurn[] {
 
 function formatWhen(iso: string | null | undefined): string {
   if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso.slice(0, 16);
-    return d.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso.slice(0, 16);
-  }
+  return formatYmdOnly(iso, "");
 }
 
 type Props = {

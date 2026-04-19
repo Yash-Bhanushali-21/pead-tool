@@ -16,7 +16,27 @@ from src.technical.support_resistance import compute_support_resistance_levels
 
 logger = logging.getLogger(__name__)
 
-_CHART_MAX_BARS = 750
+_CHART_HARD_CAP = 4000  # safety only; equity windows are usually << this
+
+
+def _bollinger(close: pd.Series, period: int = 20, num_std: float = 2.0) -> tuple[pd.Series, pd.Series, pd.Series]:
+    mid = close.rolling(period, min_periods=max(5, period // 4)).mean()
+    std = close.rolling(period, min_periods=max(5, period // 4)).std()
+    upper = mid + num_std * std
+    lower = mid - num_std * std
+    return upper, mid, lower
+
+
+def _stochastic(
+    high: pd.Series, low: pd.Series, close: pd.Series, k_period: int = 14, smooth_k: int = 3, smooth_d: int = 3
+) -> tuple[pd.Series, pd.Series]:
+    ll = low.rolling(k_period, min_periods=max(5, k_period // 2)).min()
+    hh = high.rolling(k_period, min_periods=max(5, k_period // 2)).max()
+    denom = (hh - ll).replace(0, np.nan)
+    raw_k = 100.0 * (close - ll) / denom
+    k = raw_k.rolling(smooth_k, min_periods=1).mean()
+    d = k.rolling(smooth_d, min_periods=1).mean()
+    return k, d
 
 
 def _ema(series: pd.Series, span: int) -> pd.Series:
@@ -171,9 +191,20 @@ class TechnicalAnalyzer:
         periods: Dict[str, int],
         last_close: float,
     ) -> Dict[str, Any]:
-        """OHLCV + aligned indicator series + pivot S/R for charting UIs."""
-        plot_df = df.tail(_CHART_MAX_BARS).copy()
+        """OHLCV + aligned indicator series + pivot S/R for charting UIs.
+
+        Uses the **full** analysis-window frame (chronological) so UI date ranges match the first/last
+        candle. A hard cap exists only for pathological series length.
+        """
+        plot_df = df.sort_index().copy()
+        if len(plot_df) > _CHART_HARD_CAP:
+            plot_df = plot_df.iloc[-_CHART_HARD_CAP:].copy()
         idx = plot_df.index
+        c_ = plot_df["Close"].astype(float)
+        h_ = plot_df["High"].astype(float) if "High" in plot_df.columns else c_
+        lo_ = plot_df["Low"].astype(float) if "Low" in plot_df.columns else c_
+        bb_u, bb_m, bb_l = _bollinger(c_)
+        st_k, st_d = _stochastic(h_, lo_, c_)
 
         def _time_str(ts: Any) -> str:
             if hasattr(ts, "strftime"):
@@ -220,13 +251,25 @@ class TechnicalAnalyzer:
                 "macd_signal": _align(macd_signal),
                 "macd_histogram": _align(macd_hist),
                 "volume": _align(vol),
+                "bb_upper": _align(bb_u),
+                "bb_mid": _align(bb_m),
+                "bb_lower": _align(bb_l),
+                "stoch_k": _align(st_k),
+                "stoch_d": _align(st_d),
             },
             "periods": {
                 "ma_short": periods["ma_short"],
                 "ma_long": periods["ma_long"],
                 "rsi": periods["rsi"],
+                "bb": 20,
+                "stoch_k": 14,
             },
             "support_resistance": sr,
+            "window": {
+                "first_bar": _time_str(idx[0]) if len(idx) else None,
+                "last_bar": _time_str(idx[-1]) if len(idx) else None,
+                "rows": int(len(plot_df)),
+            },
         }
 
     def _empty_result(self, reason: str) -> Dict[str, Any]:

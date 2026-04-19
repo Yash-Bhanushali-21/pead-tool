@@ -40,6 +40,7 @@ def execute_technical(
     analyzer: PEADAnalyzer,
     *,
     symbol: str,
+    preloaded_ohlcv: Optional[pd.DataFrame] = None,
     price_window: Literal["pead_event", "explicit_range"] = "pead_event",
     announcement_resolution: Literal["auto", "manual"] = "auto",
     announcement_date: Optional[str] = None,
@@ -49,6 +50,41 @@ def execute_technical(
     include_ai_verdict: bool = False,
 ) -> Dict[str, Any]:
     sym = symbol.strip().upper()
+
+    if preloaded_ohlcv is not None:
+        if preloaded_ohlcv.empty:
+            return {
+                "success": False,
+                "error": f"preloaded OHLCV is empty for {sym}.",
+                "symbol": sym,
+                "price_window": "preloaded",
+            }
+        stock_data = preloaded_ohlcv
+        idx = stock_data.index
+        out_base: Dict[str, Any] = {
+            "symbol": sym,
+            "price_window": "preloaded",
+            "range_start": str(idx.min())[:10],
+            "range_end": str(idx.max())[:10],
+        }
+        anchor = pd.Timestamp(idx[-1])
+        ta = analyzer.technical_analyzer.analyze(
+            stock_data,
+            anchor,
+            symbol=sym,
+            include_chart_payload=include_chart,
+        )
+        out: Dict[str, Any] = {
+            "success": True,
+            **out_base,
+            "ohlc_index_start": str(idx.min())[:10],
+            "ohlc_index_end": str(idx.max())[:10],
+            "technical_analysis": ta,
+        }
+        if include_ai_verdict:
+            out["research_verdict"] = generate_technical_verdict(out)
+        return out
+
     out_base: Dict[str, Any] = {"symbol": sym, "price_window": price_window}
     stock_data: Optional[pd.DataFrame] = None
 

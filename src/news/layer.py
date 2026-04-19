@@ -4,12 +4,13 @@ Shared headline collection + optional article scraping + sentiment pipeline (no 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from src.analysis.pead_analyzer import PEADAnalyzer
 from src.config.config import CONFIG
 from src.news import NewsCollector, run_news_sentiment_pipeline
+from src.news.article_preview import build_article_preview_rows
 from src.news.article_scraper import enrich_articles_with_scrapes
 from src.persistence.sqlite_news_articles import get_news_article_store
 
@@ -22,15 +23,22 @@ def run_news_sentiment_layer(
     *,
     lookback_days: int = 90,
     max_articles: int = 80,
-    preview_limit: int = 40,
+    preview_limit: int = 56,
     end_date: Optional[datetime] = None,
+    window_start: Optional[datetime] = None,
+    window_end: Optional[datetime] = None,
     scrape_bodies: bool = True,
-    max_scrape: int = 25,
+    max_scrape: int = 32,
+    include_ai_digest: bool = True,
 ) -> Dict[str, Any]:
     """
     Yahoo/Google RSS headlines + optional full-page scrape (trafilatura) + TextBlob / optional OpenAI blend.
 
-    ``end_date`` defaults to now; window is [end_date - lookback_days, end_date].
+    If ``window_start`` and ``window_end`` are set, articles are restricted to that **inclusive**
+    datetime window (same semantics as equity-research OHLCV range). In that case ``lookback_days``
+    is **ignored** (kept on the signature only for callers that use the rolling window mode).
+
+    Otherwise ``end_date`` defaults to now and the window is ``[end_date - lookback_days, end_date]``.
 
     ``max_scrape`` caps how many article URLs are fetched for body text (0 = skip scraping).
     """
@@ -38,12 +46,17 @@ def run_news_sentiment_layer(
     info = analyzer.data_manager.get_company_fundamentals(sym)
     company_name = (info.get("company_name") or sym).strip()
     coll = NewsCollector()
-    end = end_date or datetime.now()
+    if window_start is not None and window_end is not None:
+        start = window_start
+        end = window_end
+    else:
+        end = end_date or datetime.now()
+        start = end - timedelta(days=int(lookback_days))
     articles = coll.collect(
         sym,
         company_name,
+        start,
         end,
-        lookback_days=int(lookback_days),
         max_articles=int(max_articles),
     )
 
@@ -55,7 +68,7 @@ def run_news_sentiment_layer(
     else:
         scrape_stats["skipped"] = True
 
-    ns = run_news_sentiment_pipeline(sym, company_name, articles)
+    ns = run_news_sentiment_pipeline(sym, company_name, articles, include_ai_digest=include_ai_digest)
 
     persisted_rows = 0
     try:
@@ -65,44 +78,15 @@ def run_news_sentiment_layer(
     except Exception as e:
         logger.warning("Persist news citations failed: %s", e)
 
-    preview = []
-    for a in articles[:preview_limit]:
-        row: Dict[str, Any] = {
-            "title": a.title,
-            "url": a.url,
-            "published": a.published.isoformat() if a.published else None,
-            "source": a.source,
-            "summary": (a.summary or "")[:1200],
-        }
-        if (a.body_text or "").strip():
-            row["body_preview"] = (a.body_text[:900] + "…") if len(a.body_text) > 900 else a.body_text
-            row["body_word_count"] = len(a.body_text.split())
-        if a.scrape_metadata:
-            row["page_metadata"] = {
-                k: v
-                for k, v in a.scrape_metadata.items()
-                if k
-                in (
-                    "title",
-                    "author",
-                    "hostname",
-                    "sitename",
-                    "date",
-                    "description",
-                    "word_count",
-                )
-            }
-        if a.scrape_error:
-            row["scrape_error"] = a.scrape_error[:200]
-        preview.append(row)
+    preview = build_article_preview_rows(articles, int(preview_limit))
 
+    window_meta: Dict[str, Any] = {"start": start.isoformat(), "end": end.isoformat()}
+    if window_start is None or window_end is None:
+        window_meta["lookback_days"] = int(lookback_days)
     return {
         "success": True,
         "symbol": sym,
-        "window": {
-            "end": end.isoformat(),
-            "lookback_days": int(lookback_days),
-        },
+        "window": window_meta,
         "article_count": len(articles),
         "articles_preview": preview,
         "scrape": scrape_stats,

@@ -1,0 +1,54 @@
+"""Ordered stage execution with timing trace."""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Callable, List, Sequence, Tuple, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.equity_research_pipeline.context import EquityResearchRunContext
+    from src.equity_research_pipeline.protocols import EquityResearchAnalyzerServices
+
+PIPELINE_VERSION = "1.0-equity-research-tools"
+
+StageFn = Callable[["EquityResearchRunContext", "EquityResearchAnalyzerServices"], None]
+StageSpec = Tuple[str, StageFn]
+
+
+def execute_pipeline(
+    ctx: EquityResearchRunContext,
+    analyzer: EquityResearchAnalyzerServices,
+    stages: Sequence[StageSpec],
+    log: logging.Logger | logging.LoggerAdapter,
+    *,
+    trace_key: str = "pipeline_trace",
+) -> None:
+    """
+    Run each stage in order. Mutates ``ctx.results`` / ``ctx.workspace``.
+
+    Appends ``{stage, duration_ms, ok}`` to ``ctx.results[trace_key]``.
+    """
+    trace: List[dict] = []
+    ctx.results["pipeline_version"] = PIPELINE_VERSION
+    ctx.results[trace_key] = trace
+
+    for stage_name, stage_fn in stages:
+        t0 = time.perf_counter()
+        log.info("equity_research.stage.start", extra={"equity_stage": stage_name})
+        try:
+            stage_fn(ctx, analyzer)
+        except Exception:
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            trace.append({"stage": stage_name, "duration_ms": elapsed_ms, "ok": False})
+            log.exception(
+                "equity_research.stage.failed",
+                extra={"equity_stage": stage_name, "duration_ms": elapsed_ms},
+            )
+            raise
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        trace.append({"stage": stage_name, "duration_ms": elapsed_ms, "ok": True})
+        log.info(
+            "equity_research.stage.done",
+            extra={"equity_stage": stage_name, "duration_ms": elapsed_ms},
+        )

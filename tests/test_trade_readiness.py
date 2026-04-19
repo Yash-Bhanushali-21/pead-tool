@@ -37,11 +37,28 @@ class TestTradeReadiness(unittest.TestCase):
             "market_model": {"beta": 0.95, "r_squared": 0.12},
         }
         tc = compute_trade_context(results, df)
-        self.assertIn("trade_readiness_score_0_100", tc)
+        self.assertTrue(tc.get("readiness_complete"))
+        self.assertIsNotNone(tc["trade_readiness_score_0_100"])
         self.assertGreaterEqual(tc["trade_readiness_score_0_100"], 0.0)
         self.assertLessEqual(tc["trade_readiness_score_0_100"], 100.0)
         self.assertIn("pillars", tc)
         self.assertIn("risk_flags", tc)
+
+    def test_compute_trade_context_no_headline_score_without_full_inputs(self):
+        """Thin inputs: no synthetic 50-filled headline readiness."""
+        df = _dummy_ohlcv()
+        results = {
+            "technical_analysis": {
+                "stance": "bullish structure",
+                "last": {"atr_pct": 0.022},
+            },
+        }
+        tc = compute_trade_context(results, df)
+        self.assertFalse(tc.get("readiness_complete"))
+        self.assertIsNone(tc["trade_readiness_score_0_100"])
+        self.assertIn("missing_pillars", tc)
+        self.assertIn("cross_signal_alignment", tc["missing_pillars"])
+        self.assertIn("market_model_fit", tc["missing_pillars"])
 
 
 if __name__ == "__main__":

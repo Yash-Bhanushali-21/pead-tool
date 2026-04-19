@@ -20,7 +20,7 @@
 
 ## Environment
 
-- **`OPENAI_API_KEY`** — Required for **chat** / PydanticAI paths. Core `/api/tools/*` PEAD runs do not require it unless a route invokes LLM.
+- **`OPENAI_API_KEY`** — Required for **chat** / PydanticAI paths. Core `/api/tools/*` PEAD runs do not require it unless a route invokes LLM (news headline synthesis + optional **`ai_digest`** when those toggles are on).
 - Optional: `PEAD_CORS_ORIGINS`, `CHAT_SQLITE_PATH` (chat DB), etc. (see settings).
 
 ## Dev commands (typical)
