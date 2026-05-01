@@ -205,6 +205,66 @@ def stage_run_technical_tool(ctx: EquityResearchRunContext, an: EquityResearchAn
             fh.write(json.dumps(ctx.results["technical_analysis"], indent=2, default=str))
 
 
+def stage_run_exchange_announcements(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
+    """
+    Fetch NSE/BSE exchange announcements (board meetings, results filings, corporate actions)
+    for the analysis window.  Results stored in ctx.results["exchange_announcements"] and are
+    available to downstream stages (e.g. run_news_tool) for contextualisation.
+
+    Fails silently — network/API errors produce an empty result, never block the pipeline.
+    """
+    if not ctx.options.include_exchange_announcements:
+        logger.info(
+            "equity_research.stage.run_exchange_announcements %s event=skip "
+            "reason=include_exchange_announcements_false",
+            format_equity_run_ctx(ctx),
+        )
+        ctx.results["exchange_announcements"] = {"count": 0, "items": [], "skipped": True}
+        return
+
+    from src.news.exchange_announcements import (
+        build_announcements_summary,
+        fetch_exchange_announcements,
+    )
+
+    logger.info(
+        "equity_research.stage.run_exchange_announcements %s event=begin window=%s to %s",
+        format_equity_run_ctx(ctx),
+        ctx.analysis_start.date().isoformat(),
+        ctx.analysis_end.date().isoformat(),
+    )
+    try:
+        announcements = fetch_exchange_announcements(
+            ctx.symbol,
+            ctx.analysis_start,
+            ctx.analysis_end,
+            exchange="NSE",
+        )
+        summary = build_announcements_summary(announcements)
+        ctx.results["exchange_announcements"] = summary
+        logger.info(
+            "equity_research.stage.run_exchange_announcements %s event=done count=%d "
+            "has_earnings=%s has_corporate_actions=%s",
+            format_equity_run_ctx(ctx),
+            summary.get("count", 0),
+            summary.get("has_earnings", False),
+            summary.get("has_corporate_actions", False),
+        )
+    except Exception as e:
+        logger.warning(
+            "equity_research.stage.run_exchange_announcements %s event=error err=%s",
+            format_equity_run_ctx(ctx),
+            e,
+        )
+        ctx.results["exchange_announcements"] = {"count": 0, "items": [], "error": str(e)}
+
+    output_dir = ctx.results.get("output_dir")
+    if output_dir:
+        outp = Path(output_dir)
+        with open(outp / f"{ctx.symbol}_exchange_announcements.json", "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(ctx.results["exchange_announcements"], indent=2, default=str))
+
+
 def stage_run_news_tool(ctx: EquityResearchRunContext, an: EquityResearchAnalyzerServices) -> None:
     if not ctx.options.include_news:
         logger.info(
@@ -442,6 +502,7 @@ EQUITY_RESEARCH_FULL_STAGES: List[Tuple[str, Any]] = [
     ("fetch_price_window", stage_fetch_price_window),
     ("resolve_output_dir", stage_resolve_output_dir),
     ("run_fundamentals_tool", stage_run_fundamentals_tool),
+    ("run_exchange_announcements", stage_run_exchange_announcements),
     ("run_technical_tool", stage_run_technical_tool),
     ("run_news_tool", stage_run_news_tool),
     ("run_market_sentiment_tool", stage_run_market_sentiment_tool),

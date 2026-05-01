@@ -183,6 +183,14 @@ CONFIG: Dict[str, Any] = {
     "NEWS_HTML_DISCOVERY_MAX_TOTAL": _int("NEWS_HTML_DISCOVERY_MAX_TOTAL", 28),
     # Trafilatura body fetch cap default for equity pipeline (individual API calls may pass lower).
     "NEWS_BODY_SCRAPE_DEFAULT": _int("NEWS_BODY_SCRAPE_DEFAULT", 32),
+    # ── News intelligence enhancements (Issue #2) ──────────────────────────────
+    # Title-fingerprint dedup (collapses syndication copies of same story)
+    "NEWS_DEDUP_TITLE_ENABLED": _bool("NEWS_DEDUP_TITLE_ENABLED", True),
+    # NSE/BSE exchange announcements fetcher (structured filings, no NLP required)
+    "NEWS_EXCHANGE_ANNOUNCEMENTS_ENABLED": _bool("NEWS_EXCHANGE_ANNOUNCEMENTS_ENABLED", True),
+    "NEWS_EXCHANGE_ANNOUNCEMENTS_TIMEOUT_S": _int("NEWS_EXCHANGE_ANNOUNCEMENTS_TIMEOUT_S", 15),
+    # Source credibility weight overrides (JSON dict of {"Source Label": weight})
+    "NEWS_SOURCE_WEIGHTS": _get("NEWS_SOURCE_WEIGHTS", "") or None,
     "AGENT_OUTPUT_SUBDIR": _get("AGENT_OUTPUT_SUBDIR", "agent_runs"),
     # Chat persistence (SQLite)
     "CHAT_SQLITE_PATH": _get("CHAT_SQLITE_PATH", "./data/pead_chat.sqlite3"),

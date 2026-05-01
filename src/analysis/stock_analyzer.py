@@ -118,6 +118,7 @@ class StockAnalyzer:
         include_symbol_news_ai_digest: bool = True,
         include_market_news_ai_digest: bool = True,
         technical_include_ai_verdict: bool = False,
+        include_exchange_announcements: bool = True,
         pipeline_stages: Optional[Tuple[str, ...]] = None,
     ) -> Dict:
         """
@@ -185,6 +186,7 @@ class StockAnalyzer:
             include_symbol_news_ai_digest=bool(include_symbol_news_ai_digest),
             include_market_news_ai_digest=bool(include_market_news_ai_digest),
             technical_include_ai_verdict=bool(technical_include_ai_verdict),
+            include_exchange_announcements=bool(include_exchange_announcements),
             pipeline_stages=tuple(pipeline_stages) if pipeline_stages is not None else None,
         )
         ctx = new_equity_run_context(symbol, a0, a1, opts)

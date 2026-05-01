@@ -28,6 +28,8 @@ class EquityResearchRunOptions:
     include_symbol_news_ai_digest: bool = True
     #: Same for the broader market-context headline pass.
     include_market_news_ai_digest: bool = True
+    #: Run NSE/BSE exchange announcements stage (structured filings, no NLP required).
+    include_exchange_announcements: bool = True
     #: If ``None``, run the full ordered equity pipeline. If set, run only these stage ids (order
     #: follows the canonical pipeline); ``fetch_price_window`` is auto-inserted when a selected
     #: stage requires OHLCV in ``ctx.workspace``.

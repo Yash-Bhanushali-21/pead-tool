@@ -1,5 +1,11 @@
 """
 News sentiment: TextBlob on headlines/snippets + optional OpenAI JSON synthesis.
+Enhanced with:
+  - Per-article event type classification (event_classifier)
+  - Source credibility weighting (source_registry)
+  - Weighted aggregate score (credible sources count more)
+  - News signals: velocity, source agreement, event_tone (news_signals)
+  - Coverage quality metadata (coverage_meta)
 
 Set OPENAI_API_KEY for LLM layer; otherwise lexicon-only aggregate stands alone.
 """
@@ -7,11 +13,14 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from src.config.config import CONFIG, config
 from src.news.collector import NewsArticle
 from src.news.digest_llm import run_news_ai_digest
+from src.news.event_classifier import classify_event
+from src.news.source_registry import get_source_tier, get_source_weight
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +57,16 @@ def score_to_stance(score_0_100: float) -> str:
     return "neutral"
 
 
-def analyze_articles_lexicon(articles: List[NewsArticle]) -> Dict[str, Any]:
-    """Aggregate polarity → 0–100 score. No articles → no synthetic neutral score."""
+def analyze_articles_lexicon(
+    articles: List[NewsArticle],
+    event_types: Optional[List[str]] = None,
+    source_weights: Optional[List[float]] = None,
+) -> Dict[str, Any]:
+    """
+    Aggregate polarity → 0–100 score.
+    When source_weights provided, uses weighted average (credible sources count more).
+    When event_types provided, EARNINGS/GUIDANCE articles get 2× weight.
+    """
     if not articles:
         return {
             "news_score_0_100": None,
@@ -61,17 +78,25 @@ def analyze_articles_lexicon(articles: List[NewsArticle]) -> Dict[str, Any]:
             "score_unavailable_reason": "no_headlines_collected",
         }
 
-    pols, subs = [], []
-    for a in articles:
+    # High-signal event types get extra weight in the aggregate
+    _EARNINGS_EVENTS = {"EARNINGS", "GUIDANCE"}
+    pols, subs, eff_weights = [], [], []
+    for i, a in enumerate(articles):
         sc = _textblob_scores(a.text_for_sentiment())
         pols.append(sc["polarity"])
         subs.append(sc["subjectivity"])
+        # Base weight from source credibility
+        sw = source_weights[i] if source_weights else 1.0
+        # Earnings/guidance articles get 2× weight (most relevant for stock research)
+        et = event_types[i] if event_types else "GENERAL"
+        if et in _EARNINGS_EVENTS:
+            sw *= 2.0
+        eff_weights.append(sw)
 
-    mp = sum(pols) / len(pols)
-    ms = sum(subs) / len(subs)
-    # Map polarity [-1,1] to [0,100]
-    score = float((mp + 1.0) * 50.0)
-    score = max(0.0, min(100.0, score))
+    total_w = sum(eff_weights) or 1.0
+    mp = sum(p * w for p, w in zip(pols, eff_weights)) / total_w
+    ms = sum(s * w for s, w in zip(subs, eff_weights)) / total_w
+    score = float(max(0.0, min(100.0, (mp + 1.0) * 50.0)))
 
     return {
         "news_score_0_100": score,
@@ -79,7 +104,7 @@ def analyze_articles_lexicon(articles: List[NewsArticle]) -> Dict[str, Any]:
         "mean_subjectivity": ms,
         "article_count": len(articles),
         "lexicon_stance": score_to_stance(score),
-        "method": "textblob",
+        "method": "textblob_weighted" if source_weights else "textblob",
     }
 
 
@@ -156,18 +181,22 @@ def _map_llm_to_score(llm: Dict[str, Any]) -> float:
         base = 72.0
     elif "bear" in o:
         base = 28.0
-    else:
-        base = 50.0
-    # Pull toward 50 if low confidence
     return base * conf + 50.0 * (1.0 - conf)
 
 
-def per_article_lexicon(articles: List[NewsArticle], limit: int = 80) -> List[Dict[str, Any]]:
-    """Per-article polarity + stance for transparency (research only)."""
+def per_article_lexicon(
+    articles: List[NewsArticle],
+    limit: int = 80,
+    event_types: Optional[List[str]] = None,
+    source_weights: Optional[List[float]] = None,
+) -> List[Dict[str, Any]]:
+    """Per-article polarity + stance + event type + source weight for transparency."""
     rows: List[Dict[str, Any]] = []
-    for a in articles[:limit]:
+    for i, a in enumerate(articles[:limit]):
         sc = _textblob_scores(a.text_for_sentiment())
         pol = sc["polarity"]
+        et = event_types[i] if event_types and i < len(event_types) else "GENERAL"
+        sw = source_weights[i] if source_weights and i < len(source_weights) else get_source_weight(a.source)
         rows.append(
             {
                 "title": a.title[:200],
@@ -176,17 +205,70 @@ def per_article_lexicon(articles: List[NewsArticle], limit: int = 80) -> List[Di
                 "published": a.published.strftime("%Y-%m-%d") if a.published else None,
                 "polarity": round(pol, 4),
                 "stance": polarity_to_stance(pol),
+                "event_type": et,
+                "source_weight": round(sw, 3),
+                "source_tier": get_source_tier(sw),
                 "has_body": bool((a.body_text or "").strip()),
                 "scrape_ok": a.scrape_error is None and bool((a.body_text or "").strip()),
                 "scrape_error": a.scrape_error,
                 "metadata": {
                     k: v
                     for k, v in (a.scrape_metadata or {}).items()
-                    if k in ("hostname", "sitename", "author", "date", "word_count")
+                    if k in ("hostname", "sitename", "author", "date", "word_count", "exchange", "filing_type")
                 },
             }
         )
     return rows
+
+
+def _build_coverage_meta(
+    articles: List[NewsArticle],
+    source_weights: List[float],
+    event_types: List[str],
+    dedup_removed: int = 0,
+) -> Dict[str, Any]:
+    """Build coverage quality metadata for analyst transparency."""
+    tier_counts: Dict[str, int] = {"tier1": 0, "tier2": 0, "tier3": 0, "tier4": 0}
+    for w in source_weights:
+        tier_counts[get_source_tier(w)] += 1
+
+    event_counts: Dict[str, int] = {}
+    for et in event_types:
+        event_counts[et] = event_counts.get(et, 0) + 1
+
+    has_exchange = any(
+        a.source in ("NSE Announcement", "BSE Announcement") for a in articles
+    )
+
+    # Quality heuristic
+    if tier_counts["tier1"] >= 3 or (tier_counts["tier1"] >= 1 and tier_counts["tier2"] >= 5):
+        quality = "high"
+        quality_reason = "Exchange or wire coverage present with Tier-2 press"
+    elif tier_counts["tier2"] >= 5:
+        quality = "medium"
+        quality_reason = f"Tier-2 press coverage ({tier_counts['tier2']} articles)"
+    elif tier_counts["tier2"] >= 2:
+        quality = "low_medium"
+        quality_reason = f"Limited Tier-2 coverage ({tier_counts['tier2']} articles); RSS-heavy"
+    else:
+        quality = "low"
+        quality_reason = "Predominantly search-aggregated (Tier 3/4); verify with primary sources"
+
+    return {
+        "tier1_count": tier_counts["tier1"],
+        "tier2_count": tier_counts["tier2"],
+        "tier3_count": tier_counts["tier3"],
+        "tier4_count": tier_counts["tier4"],
+        "has_exchange_announcements": has_exchange,
+        "event_type_counts": event_counts,
+        "earnings_articles": event_counts.get("EARNINGS", 0),
+        "guidance_articles": event_counts.get("GUIDANCE", 0),
+        "analyst_rating_articles": event_counts.get("ANALYST_RATING", 0),
+        "regulatory_articles": event_counts.get("REGULATORY", 0),
+        "dedup_removed": dedup_removed,
+        "coverage_quality": quality,
+        "coverage_quality_reason": quality_reason,
+    }
 
 
 def run_news_sentiment_pipeline(
@@ -195,11 +277,18 @@ def run_news_sentiment_pipeline(
     articles: List[NewsArticle],
     *,
     include_ai_digest: bool = True,
+    window_start: Optional[datetime] = None,
+    window_end: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """
     Lexicon aggregate + optional LLM narrative; combined score when LLM present.
+    Enhanced: event classification, source credibility weighting, news signals, coverage_meta.
     """
-    lex = analyze_articles_lexicon(articles)
+    # Classify events and get source weights for all articles
+    event_types = [classify_event(a) for a in articles]
+    source_weights = [get_source_weight(a.source) for a in articles]
+
+    lex = analyze_articles_lexicon(articles, event_types=event_types, source_weights=source_weights)
     llm = _llm_synthesis(symbol, company_name, articles)
 
     out = {
@@ -217,7 +306,7 @@ def run_news_sentiment_pipeline(
             out["news_score_0_100"] = float(max(0.0, min(100.0, combined)))
         else:
             out["news_score_0_100"] = float(max(0.0, min(100.0, llm_score)))
-        out["method"] = "textblob+openai"
+        out["method"] = "textblob_weighted+openai"
         overall = (llm.get("overall") or "neutral").lower()
         if "bull" in overall:
             out["llm_stance"] = "bullish"
@@ -227,7 +316,7 @@ def run_news_sentiment_pipeline(
             out["llm_stance"] = "neutral"
     else:
         out["news_score_0_100"] = lex["news_score_0_100"]
-        out["method"] = "textblob"
+        out["method"] = "textblob_weighted" if articles else "textblob"
         out["llm_stance"] = None
 
     ns = out.get("news_score_0_100")
@@ -243,11 +332,37 @@ def run_news_sentiment_pipeline(
         + (f", LLM {out.get('llm_stance')}" if out.get("llm_stance") else "")
         + "). Research context only — not a buy/sell recommendation."
     )
-    out["per_article"] = per_article_lexicon(articles)
+    out["per_article"] = per_article_lexicon(
+        articles, event_types=event_types, source_weights=source_weights
+    )
     out["disclaimer"] = (
         "Media sentiment is noisy and incomplete; many articles are headlines only or blocked from scraping. "
         "Not investment advice."
     )
+
+    # Coverage quality metadata
+    out["coverage_meta"] = _build_coverage_meta(articles, source_weights, event_types)
+
+    # Quantitative news signals
+    if window_start and window_end and articles:
+        try:
+            from src.news.news_signals import compute_all_signals
+
+            articles_data = [
+                {
+                    "published": a.published,
+                    "polarity": out["per_article"][i]["polarity"] if i < len(out["per_article"]) else 0.0,
+                    "source_weight": source_weights[i],
+                    "event_type": event_types[i],
+                }
+                for i, a in enumerate(articles)
+            ]
+            out["news_signals"] = compute_all_signals(articles_data, window_start, window_end)
+        except Exception as _sig_err:
+            logger.debug("News signals computation failed: %s", _sig_err)
+            out["news_signals"] = None
+    else:
+        out["news_signals"] = None
 
     if include_ai_digest:
         digest = run_news_ai_digest(symbol, company_name, articles, out)

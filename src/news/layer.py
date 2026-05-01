@@ -68,7 +68,14 @@ def run_news_sentiment_layer(
     else:
         scrape_stats["skipped"] = True
 
-    ns = run_news_sentiment_pipeline(sym, company_name, articles, include_ai_digest=include_ai_digest)
+    ns = run_news_sentiment_pipeline(
+        sym,
+        company_name,
+        articles,
+        include_ai_digest=include_ai_digest,
+        window_start=start,
+        window_end=end,
+    )
 
     persisted_rows = 0
     try:
