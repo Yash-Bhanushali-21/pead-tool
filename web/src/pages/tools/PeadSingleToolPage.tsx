@@ -36,6 +36,7 @@ export default function PeadSingleToolPage() {
   const [includeSymbolNewsAiDigest, setIncludeSymbolNewsAiDigest] = useState(true);
   const [includeMarketNewsAiDigest, setIncludeMarketNewsAiDigest] = useState(true);
   const [technicalIncludeAiVerdict, setTechnicalIncludeAiVerdict] = useState(false);
+  const [includeExchangeAnnouncements, setIncludeExchangeAnnouncements] = useState(true);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export default function PeadSingleToolPage() {
         include_symbol_news_ai_digest: includeSymbolNewsAiDigest,
         include_market_news_ai_digest: includeMarketNewsAiDigest,
         technical_include_ai_verdict: technicalIncludeAiVerdict,
+        include_exchange_announcements: includeExchangeAnnouncements,
         output_dir: outputDir || undefined,
       };
       if (newsMaxArticles !== "") body.news_max_articles = Number(newsMaxArticles);
@@ -143,6 +145,15 @@ export default function PeadSingleToolPage() {
             className="rounded border-surface-border"
           />
           After technicals: AI trade plan (S/R, entry & exit levels)
+        </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={includeExchangeAnnouncements}
+            onChange={(e) => setIncludeExchangeAnnouncements(e.target.checked)}
+            className="rounded border-surface-border"
+          />
+          NSE/BSE exchange announcements
         </label>
       </div>
 

@@ -4,10 +4,14 @@ Collect news headlines/snippets for an Indian equity symbol from:
 - Google News RSS (multiple query variants + India locale)
 - Bing News RSS
 - DuckDuckGo lite HTML (best-effort)
+- Built-in India financial RSS feeds (NDTV Profit, Mint, Business Standard, etc.)
 - Optional extra RSS feeds (``PEAD_NEWS_EXTRA_RSS_FEEDS`` / ``NEWS_EXTRA_RSS_FEEDS``), filtered to the symbol/company
 
 Optional full-article text via ``article_scraper.enrich_articles_with_scrapes`` (trafilatura).
 Default sentiment still works on title + snippet when bodies are not fetched.
+
+Post-collection deduplication via ``src.news.dedup.dedup_by_title`` (title-fingerprint
+dedup beyond URL dedup to collapse syndication copies).
 """
 from __future__ import annotations
 
@@ -126,6 +130,12 @@ class NewsCollector:
             )
         )
         time.sleep(0.3)
+        out.extend(
+            self._india_financial_rss_symbol_scoped(
+                symbol, company_name, window_start, window_end, seen_urls, max(10, max_articles // 3)
+            )
+        )
+        time.sleep(0.3)
         try:
             from src.news.newsapi_fetcher import fetch_newsapi_everything
 
@@ -151,6 +161,12 @@ class NewsCollector:
             if a.published is None or (window_start <= a.published <= window_end)
         ]
         out.sort(key=lambda a: a.published or datetime.min, reverse=True)
+        # Title-fingerprint dedup: collapses syndication copies, keeps highest-credibility source
+        try:
+            from src.news.dedup import dedup_by_title
+            out = dedup_by_title(out)
+        except Exception as _dedup_err:
+            logger.debug("Title dedup skipped: %s", _dedup_err)
         return out[:max_articles]
 
     def _yahoo_news(
@@ -477,7 +493,15 @@ class NewsCollector:
             "yield",
         ]
         out: List[NewsArticle] = []
+        # Built-in Tier-2 India feeds first
+        out.extend(
+            self._india_financial_rss_market(
+                window_start, window_end, seen, max(8, cap // 2), market_keywords=kws
+            )
+        )
         for i, url in enumerate(feeds):
+            if len(out) >= cap:
+                break
             label = f"Market RSS ({url.split('/')[2][:30]})"
             try:
                 r = self._session.get(url.strip(), timeout=self.timeout)
@@ -688,6 +712,103 @@ class NewsCollector:
         cap: int,
     ) -> List[NewsArticle]:
         return self._duckduckgo_lite_html(symbol, company_name, window_start, window_end, seen, cap)
+
+    # Built-in India financial RSS feeds (Tier 2 sources, always polled)
+    _INDIA_FINANCIAL_RSS: List[tuple] = [
+        ("https://feeds.feedburner.com/ndtvprofit-latest", "NDTV Profit"),
+        ("https://www.livemint.com/rss/markets", "Mint"),
+        ("https://www.business-standard.com/rss/markets-106.rss", "Business Standard"),
+        ("https://www.thehindubusinessline.com/markets/feeder/default.rss", "BusinessLine"),
+        ("https://economictimes.indiatimes.com/markets/stocks/rssfeeds/2146842.cms", "Economic Times"),
+        ("https://www.moneycontrol.com/rss/results.xml", "MoneyControl"),
+        ("https://www.financialexpress.com/market/feed/", "Financial Express"),
+    ]
+
+    def _india_financial_rss_symbol_scoped(
+        self,
+        symbol: str,
+        company_name: str,
+        start: datetime,
+        end: datetime,
+        seen: Set[str],
+        cap: int,
+    ) -> List[NewsArticle]:
+        """
+        Poll built-in Tier-2 India financial RSS feeds and keep articles
+        that match the target symbol/company.  These feeds are always active
+        (no config key needed) unlike the user-configurable PEAD_NEWS_EXTRA_RSS_FEEDS.
+        """
+        out: List[NewsArticle] = []
+        for feed_url, label in self._INDIA_FINANCIAL_RSS:
+            if len(out) >= cap:
+                break
+            try:
+                r = self._session.get(feed_url.strip(), timeout=self.timeout)
+                r.raise_for_status()
+                parsed = feedparser.parse(r.content)
+            except Exception as e:
+                logger.debug("India financial RSS fetch failed (%s): %s", feed_url[:60], e)
+                continue
+            for e in getattr(parsed, "entries", []) or []:
+                if len(out) >= cap:
+                    break
+                art = self._article_from_feed_entry(e, source_label=label)
+                if art is None or art.url in seen:
+                    continue
+                if not self._matches_symbol_scope(self._haystack(art), symbol, company_name):
+                    continue
+                seen.add(art.url)
+                out.append(art)
+            time.sleep(0.25)
+        if out:
+            logger.info(
+                "news_ingest.source source=india_financial_rss symbol=%s fetched=%d",
+                symbol,
+                len(out),
+            )
+        return out[:cap]
+
+    def _india_financial_rss_market(
+        self,
+        window_start: datetime,
+        window_end: datetime,
+        seen: Set[str],
+        cap: int,
+        *,
+        market_keywords: Optional[List[str]] = None,
+    ) -> List[NewsArticle]:
+        """
+        Same built-in Tier-2 feeds for the market-context pass (keyword-filtered).
+        """
+        kws = market_keywords or [
+            "nifty", "sensex", "nse", "bse", "india", "market", "stock",
+            "rbi", "rupee", "crude", "oil", "fii", "dii", "gdp", "inflation",
+            "bond", "yield", "budget", "rate",
+        ]
+        out: List[NewsArticle] = []
+        for feed_url, label in self._INDIA_FINANCIAL_RSS:
+            if len(out) >= cap:
+                break
+            try:
+                r = self._session.get(feed_url.strip(), timeout=self.timeout)
+                r.raise_for_status()
+                parsed = feedparser.parse(r.content)
+            except Exception as e:
+                logger.debug("India financial market RSS failed (%s): %s", feed_url[:60], e)
+                continue
+            for e in getattr(parsed, "entries", []) or []:
+                if len(out) >= cap:
+                    break
+                art = self._article_from_feed_entry(e, source_label=label)
+                if art is None or art.url in seen:
+                    continue
+                hay = self._haystack(art)
+                if not any(k in hay for k in kws):
+                    continue
+                seen.add(art.url)
+                out.append(art)
+            time.sleep(0.22)
+        return out[:cap]
 
     @staticmethod
     def _strip_html(s: str) -> str:

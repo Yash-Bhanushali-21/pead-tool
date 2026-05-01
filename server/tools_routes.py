@@ -64,6 +64,8 @@ def tools_config() -> dict[str, Any]:
             "news_google_chunk_threshold_days": CONFIG.get("NEWS_GOOGLE_CHUNK_THRESHOLD_DAYS", 90),
             "news_html_discovery_enabled": bool(CONFIG.get("NEWS_HTML_DISCOVERY_ENABLED", True)),
             "news_html_discovery_max_total": int(CONFIG.get("NEWS_HTML_DISCOVERY_MAX_TOTAL", 28)),
+            "exchange_announcements_enabled": bool(CONFIG.get("NEWS_EXCHANGE_ANNOUNCEMENTS_ENABLED", True)),
+            "news_dedup_title_enabled": bool(CONFIG.get("NEWS_DEDUP_TITLE_ENABLED", True)),
         },
         "technical": {
             "openai_tech_verdict_model": config.OPENAI_TECH_VERDICT_MODEL,
@@ -123,6 +125,10 @@ class PeadSingleRequest(BaseModel):
     technical_include_ai_verdict: bool = Field(
         False,
         description="When True, after technicals, request OpenAI commentary on the snapshot (next-session entry/exit discussion; not advice). Requires OPENAI_API_KEY.",
+    )
+    include_exchange_announcements: bool = Field(
+        True,
+        description="Fetch NSE/BSE corporate announcements (board meetings, results filings, corporate actions) for the analysis window.",
     )
     output_dir: str = Field(default_factory=lambda: str(ROOT / "output"))
     pipeline_stages: Optional[List[str]] = Field(
@@ -211,6 +217,7 @@ async def run_single(body: PeadSingleRequest) -> dict[str, Any]:
             include_symbol_news_ai_digest=body.include_symbol_news_ai_digest,
             include_market_news_ai_digest=body.include_market_news_ai_digest,
             technical_include_ai_verdict=body.technical_include_ai_verdict,
+            include_exchange_announcements=body.include_exchange_announcements,
             pipeline_stages=tuple(body.pipeline_stages) if body.pipeline_stages else None,
         )
 
@@ -489,3 +496,51 @@ async def run_document_pdf(body: DocumentPdfRequest) -> dict[str, Any]:
 
     out = await asyncio.to_thread(_run)
     return _json_safe(out)
+
+
+class ExchangeAnnouncementsRequest(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=32)
+    range_start: str = Field(..., min_length=8, max_length=32, description="YYYY-MM-DD inclusive start")
+    range_end: str = Field(..., min_length=8, max_length=32, description="YYYY-MM-DD inclusive end")
+    exchange: str = Field("NSE", description="NSE | BSE | both")
+
+    @model_validator(mode="after")
+    def ordered_range(self) -> "ExchangeAnnouncementsRequest":
+        rs = pd.to_datetime(str(self.range_start).strip()).normalize()
+        re = pd.to_datetime(str(self.range_end).strip()).normalize()
+        if rs > re:
+            raise ValueError("range_start must be on or before range_end")
+        return self
+
+
+@router.post("/run/exchange-announcements")
+async def run_exchange_announcements(body: ExchangeAnnouncementsRequest) -> dict[str, Any]:
+    """
+    Fetch NSE/BSE corporate announcements for a symbol in the given date window.
+    Returns structured filing data: board meetings, results, corporate actions, regulatory notices.
+    Works standalone — does not require the full equity pipeline.
+    """
+    sym = body.symbol.strip().upper()
+    rs = pd.Timestamp(str(body.range_start).strip()).normalize().to_pydatetime()
+    re = pd.Timestamp(str(body.range_end).strip()).normalize().replace(
+        hour=23, minute=59, second=59, microsecond=999999
+    )
+
+    def _run() -> dict[str, Any]:
+        from src.news.exchange_announcements import (
+            build_announcements_summary,
+            fetch_exchange_announcements,
+        )
+        announcements = fetch_exchange_announcements(
+            sym, rs, re, exchange=body.exchange.upper()
+        )
+        summary = build_announcements_summary(announcements)
+        return {
+            "success": True,
+            "symbol": sym,
+            "exchange": body.exchange.upper(),
+            "window": {"start": rs.date().isoformat(), "end": re.date().isoformat()},
+            **summary,
+        }
+
+    return _json_safe(await asyncio.to_thread(_run))

@@ -93,6 +93,7 @@ def run_market_sentiment_layer(
             window_start, window_end, seen, max(12, max_articles // 2)
         )
     )
+    # Built-in Tier-2 India financial feeds (already polled inside collect_from_extra_rss_market)
 
     merged = [a for a in merged if a.published is None or (window_start <= a.published <= window_end)]
     merged.sort(key=lambda a: a.published or datetime.min, reverse=True)
@@ -109,7 +110,12 @@ def run_market_sentiment_layer(
         scrape_stats["skipped"] = True
 
     ns = run_news_sentiment_pipeline(
-        sym, f"{company_name} (market context)", articles, include_ai_digest=include_ai_digest
+        sym,
+        f"{company_name} (market context)",
+        articles,
+        include_ai_digest=include_ai_digest,
+        window_start=window_start,
+        window_end=window_end,
     )
 
     persisted_rows = 0

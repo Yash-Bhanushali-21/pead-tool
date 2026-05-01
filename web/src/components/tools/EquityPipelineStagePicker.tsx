@@ -23,9 +23,22 @@ const PRESET_FUND_ONLY: Partial<StageToggleMap> = {
   fetch_price_window: false,
   resolve_output_dir: false,
   run_fundamentals_tool: true,
+  run_exchange_announcements: false,
   run_technical_tool: false,
   run_news_tool: false,
   run_market_sentiment_tool: false,
+  run_trade_context: false,
+  run_research_desk: false,
+};
+
+const PRESET_NEWS_INTEL: Partial<StageToggleMap> = {
+  fetch_price_window: false,
+  resolve_output_dir: false,
+  run_fundamentals_tool: false,
+  run_exchange_announcements: true,
+  run_technical_tool: false,
+  run_news_tool: true,
+  run_market_sentiment_tool: true,
   run_trade_context: false,
   run_research_desk: false,
 };
@@ -91,6 +104,13 @@ export function EquityPipelineStagePicker({
             onClick={() => onChange(applyPreset(PRESET_FUND_ONLY))}
           >
             Fundamentals only
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-sky-800/60 bg-sky-950/40 px-2.5 py-1 text-xs text-sky-100 hover:bg-sky-950/70"
+            onClick={() => onChange(applyPreset(PRESET_NEWS_INTEL))}
+          >
+            News intelligence
           </button>
         </div>
       </div>
